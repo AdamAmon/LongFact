@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Byte-compiled / distribution / packaging
+build/
+dist/
+eggs/
+*.egg-info/
+pip-wheel-metadata/
+
+# PyTorch and models
+*.pt
+*.pth
+*.bin
+*.model
+
+# Data and outputs
+*.jsonl
+*.log
+*.gz
+data/*.cache
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# caches
+.cache/
+__pycache__/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# secrets
+.env
+*.pem
