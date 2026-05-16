@@ -21,11 +21,42 @@ pip-wheel-metadata/
 *.bin
 *.model
 
+# Model / index outputs
+models/
+checkpoints/
+index/
+index/*
+*.index
+
+# Experiment outputs and results
+results/
+logs/
+runs/
+
+# FAISS / embedding indexes
+*.faiss
+*.index
+
+# Hugging Face / transformer caches
+.cache/huggingface
+.cache/transformers
+.cache/hf
+huggingface/
+transformers_cache/
+sentence_transformers_cache/
+
+# Weights & large artifacts
+*.ckpt
+*.safetensors
+
+
 # Data and outputs
 *.jsonl
 *.log
 *.gz
 data/*.cache
+data/*.index
+data/*.bin
 
 # IDEs and OS
 .vscode/

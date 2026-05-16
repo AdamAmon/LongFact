@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/scripts/longfact-hooks.ps1",
+        "cwd": "D:/WBC/NJUniversity/LongFact",
+        "timeout": 20
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/scripts/longfact-hooks.ps1",
+        "cwd": "D:/WBC/NJUniversity/LongFact",
+        "timeout": 60
+      }
+    ]
+  }
+}
