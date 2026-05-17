@@ -4,6 +4,7 @@
 """
 from typing import List, Tuple, Optional
 import os
+import numpy as np
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -30,8 +31,38 @@ class Retriever:
 
     def build_index(self, passages: List[str]):
         """建立向量索引并（可选）BM25 索引。"""
-        self.corpus = passages
-        embs = self.model.encode(passages, convert_to_numpy=True, show_progress_bar=False)
+        # filter out empty passages before encoding
+        filtered = [p for p in passages if p and p.strip()]
+        self.corpus = filtered
+        if not filtered:
+            # nothing to index; leave index as None
+            self.index = None
+            self.bm25 = None
+            return
+
+        embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
+        # normalize embedding output to a 2D numpy array
+        if isinstance(embs, list):
+            embs = np.array(embs)
+        else:
+            embs = np.asarray(embs)
+
+        # debug info for unexpected embedding shapes
+        try:
+            print(f"[Retriever] build_index: passages={len(passages)} filtered={len(filtered)} embs_type={type(embs)} embs_shape={embs.shape}")
+        except Exception:
+            print(f"[Retriever] build_index: passages={len(passages)} filtered={len(filtered)} embs_type={type(embs)} (no shape)")
+
+        if embs.size == 0:
+            # unexpected: treat as no index
+            self.index = None
+            self.bm25 = None
+            return
+
+        if embs.ndim == 1:
+            # single vector -> make it 2D
+            embs = embs.reshape(1, -1)
+
         dim = embs.shape[1]
         if faiss is None:
             raise ImportError("faiss-cpu is required for indexing")
@@ -54,6 +85,9 @@ class Retriever:
             raise RuntimeError("Index not built. Call build_index() first.")
 
         q_emb = self.model.encode([text], convert_to_numpy=True)
+        q_emb = np.asarray(q_emb)
+        if q_emb.ndim == 1:
+            q_emb = q_emb.reshape(1, -1)
         faiss.normalize_L2(q_emb)
         D, I = self.index.search(q_emb, top_k)
         emb_results = [(int(i), float(d)) for i, d in zip(I[0], D[0])]

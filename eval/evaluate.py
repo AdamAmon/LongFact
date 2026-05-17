@@ -31,8 +31,13 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
     details = []
     supported = 0
     for s in sents:
-        hits = retriever.query(s, top_k=top_k)
-        evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
+        # if retriever has no index (e.g., empty document), skip retrieval
+        if getattr(retriever, 'index', None) is None and getattr(retriever, 'bm25', None) is None:
+            hits = []
+            evidences = []
+        else:
+            hits = retriever.query(s, top_k=top_k)
+            evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
         is_sup = False
         best_label = None
         best_score = 0.0
