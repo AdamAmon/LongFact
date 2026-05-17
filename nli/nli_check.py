@@ -13,9 +13,11 @@ except Exception:
     AutoTokenizer = None
     AutoModelForSequenceClassification = None
 
+from config import DEFAULT_NLI_MODEL
+
 
 class NLIChecker:
-    def __init__(self, model_name: str = "facebook/bart-large-mnli", device: int = -1):
+    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1):
         if AutoTokenizer is None or AutoModelForSequenceClassification is None:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')

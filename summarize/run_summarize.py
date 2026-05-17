@@ -8,6 +8,7 @@ from typing import List
 import textwrap
 import json
 
+from config import DEFAULT_SUMMARIZER_MODEL
 from summarize.model_summarizer import get_summarizer
 
 
@@ -52,8 +53,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', type=str, required=True, help='输入文本或文件路径')
     parser.add_argument('--use_model', action='store_true', help='是否使用 HF 模型生成局部摘要')
-    parser.add_argument('--model_name', type=str, default='google/flan-t5-large', help='HF 模型名')
+    parser.add_argument('--model_name', type=str, default=DEFAULT_SUMMARIZER_MODEL, help='HF 模型名')
     parser.add_argument('--device', type=int, default=-1, help='模型设备: -1=CPU, >=0 GPU id')
+    parser.add_argument('--chunk_size', type=int, default=200, help='分块时的最大长度近似值')
     parser.add_argument('--out', type=str, default=None, help='可选：输出 jsonl 路径，保存生成结果')
     args = parser.parse_args()
     inp = args.input
@@ -64,7 +66,17 @@ def main():
     except FileNotFoundError:
         text = inp
 
-    out = run_pipeline(text, use_model=args.use_model, model_name=args.model_name, device=args.device)
+    chunks = chunk_text(text, max_tokens=args.chunk_size)
+    summarizer = get_summarizer(model_name=args.model_name if args.use_model else None, device=args.device)
+    local_summaries = summarizer.summarize_chunks(chunks)
+    fused = fuse_summaries(local_summaries)
+    out = {
+        'chunks': chunks,
+        'local_summaries': local_summaries,
+        'fused': fused,
+        'model_name': args.model_name if args.use_model else None,
+        'chunk_size': args.chunk_size,
+    }
 
     print('\n=== Fused Summary ===\n')
     print(textwrap.fill(out['fused'], width=80))

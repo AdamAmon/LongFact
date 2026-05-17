@@ -45,6 +45,12 @@ huggingface/
 transformers_cache/
 sentence_transformers_cache/
 
+# Local Hugging Face cache created by bootstrap_local.py
+.hf-cache/
+
+# Local dataset cache
+data/cache/
+
 # Weights & large artifacts
 *.ckpt
 *.safetensors
@@ -73,4 +79,5 @@ __pycache__/
 
 # secrets
 .env
+.env.local
 *.pem

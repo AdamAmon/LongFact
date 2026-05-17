@@ -1,0 +1,4 @@
+- After changes, prefer a focused runnable check on the touched slice.
+- For Python changes in this repo, verify the file still imports or a small sample pipeline runs.
+- Keep ROUGE and factual consistency evaluation separate in outputs.
+- For experiments, save sample outputs and case studies to JSON/JSONL files.

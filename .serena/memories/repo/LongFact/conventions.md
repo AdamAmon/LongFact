@@ -1,0 +1,5 @@
+- Keep modules focused and CLI-driven with argparse.
+- Guard optional HF/FAISS/dataset imports so fallback paths still load.
+- Prefer structured dict outputs for pipeline helpers and write experiment outputs to files.
+- Preserve backward-compatible flags and keep long-running/model-heavy work behind CLI switches.
+- Avoid side effects on import.

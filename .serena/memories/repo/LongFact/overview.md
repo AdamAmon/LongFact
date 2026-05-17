@@ -1,0 +1,5 @@
+- LongFact is a Python 3.8+ coursework scaffold for long-document summarization factual consistency evaluation and correction on GovReport.
+- Pipeline shape: data sampling -> chunked summarization -> evidence retrieval -> NLI check -> local correction -> evaluation.
+- Main entrypoints: data/load_govreport.py, summarize/run_summarize.py, run_experiment.py.
+- Core modules: summarize/, retrieval/, nli/, correction/, eval/.
+- Current implementation is lightweight and fallback-friendly; HF/FAISS/datasets imports are optional and guarded.

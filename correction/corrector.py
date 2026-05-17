@@ -9,9 +9,11 @@ try:
 except Exception:
     pipeline = None
 
+from config import DEFAULT_CORRECTOR_MODEL
+
 
 class Corrector:
-    def __init__(self, model_name: Optional[str] = None, device: int = -1, max_length: int = 128):
+    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128):
         self.model_name = model_name
         self.device = device
         self.max_length = max_length

@@ -9,23 +9,34 @@ try:
 except Exception:
     pipeline = None
 
+from config import DEFAULT_SUMMARIZER_MODEL
+
 
 class HFLocalSummarizer:
-    def __init__(self, model_name: str = 'google/flan-t5-large', device: int = -1, max_length: int = 256):
+    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256):
         if pipeline is None:
             raise ImportError('transformers is required for HFLocalSummarizer')
-        # use text2text-generation pipeline for T5/Flan models
-        self.pipe = pipeline('text2text-generation', model=model_name, device=device, truncation=True)
+        self.pipe = pipeline('text-generation', model=model_name, device=device, truncation=True)
         self.max_length = max_length
 
+    def build_prompt(self, chunk: str, prompt: Optional[str] = None) -> str:
+        instruction = prompt or (
+            'Summarize the following long document chunk in 2-3 concise factual sentences. '
+            'Preserve names, numbers, and key outcomes. Avoid adding unsupported details.'
+        )
+        return f'{instruction}\n\nDocument chunk:\n{chunk}\n\nSummary:'
+
     def summarize_chunk(self, chunk: str, prompt: Optional[str] = None) -> str:
-        if prompt:
-            inp = prompt + '\n\n' + chunk
-        else:
-            inp = chunk
-        out = self.pipe(inp, max_length=self.max_length, truncation=True)
+        inp = self.build_prompt(chunk, prompt=prompt)
+        out = self.pipe(
+            inp,
+            max_new_tokens=self.max_length,
+            do_sample=False,
+            truncation=True,
+            return_full_text=False,
+        )
         if isinstance(out, list) and len(out) > 0:
-            return out[0].get('generated_text', out[0].get('summary_text', ''))
+            return out[0].get('generated_text', out[0].get('summary_text', '')).strip()
         return ''
 
     def summarize_chunks(self, chunks: List[str], prompt: Optional[str] = None) -> List[str]:

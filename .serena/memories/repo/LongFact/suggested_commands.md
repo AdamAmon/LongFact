@@ -1,0 +1,5 @@
+- python data/load_govreport.py --split validation --sample_size 500 --out govreport_sample.jsonl
+- python summarize/run_summarize.py --input path/to/document.txt --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --out sample_result.json
+- python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --out experiment_results.jsonl
+- python -m pyflakes . or flake8 for a quick syntax/lint check
+- Use .venv\Scripts\python.exe on Windows when the virtual environment is not already active.

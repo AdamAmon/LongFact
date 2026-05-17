@@ -1,3 +1,32 @@
+# Normalize line endings to LF for text files
+* text=auto
+
+# Ensure common text files use LF in the repository
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.rst text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# Binary files - do not attempt to normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.gz binary
+*.bz2 binary
+*.mp4 binary
+*.mp3 binary
+
+# Prevent accidental check-in of environment files
+.env text eol=lf
+.env.local text eol=lf
 * text=auto
 *.py text eol=lf
 *.sh text eol=lf
