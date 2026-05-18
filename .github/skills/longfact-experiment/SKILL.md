@@ -21,6 +21,25 @@ user-invocable: true
 4. If a model run fails, fall back to CPU-safe or placeholder execution paths.
 5. Save representative examples for the final report.
 
+## Canonical Commands (verified)
+
+```powershell
+# 1) Tiny run for sanity check
+python run_experiment.py --n 1 --device -1 --out results/exp_n1.jsonl
+
+# 2) Small experiment run (task baseline)
+python run_experiment.py --n 10 --use_model --device -1 --out results/exp_n10.jsonl
+
+# 3) Sentence-level pipeline debug
+python workflow/run_pipeline_simple.py --sample_size 1 --out results/pipeline_n1.jsonl --device -1
+```
+
+## Guardrails
+
+- Do not use unsupported flags for `run_experiment.py` (e.g. `--sample-size`, `--input`).
+- Always run a small validation (`n=1`) before larger runs.
+- If NLI results are all `ERROR`, pause scaling and debug NLI first.
+
 ## Output Expectations
 
 - State whether the run used fallback logic or a real model.

@@ -108,3 +108,90 @@ python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instr
 - 或者我可以帮你把 `prediction` 为空的问题定位并修复为优先任务。
 
 感谢使用 LongFact；如需我继续运行实验或修改代码文档，请告诉我下一步。
+
+## 补充说明（方便从 README 完全理解并复现实验）
+
+以下说明旨在帮助你仅凭 README 即可复现实验、理解输出与常用运维步骤。
+
+- **复现实验（Task 3.1 — n=10）步骤**：
+	1. 确保模型与数据已缓存到本地（参见上文 HF 缓存变量）。
+	2. 激活虚拟环境并安装依赖：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+	3. 运行端到端实验（样例）：
+
+```powershell
+python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device -1 --dataset_cache_dir data/cache --out results/experiment_n10.jsonl
+```
+
+	4. 生成汇总（ROUGE 与句级 NLI 统计）：
+
+```powershell
+python scripts/analyze_results.py --input results/experiment_n10.jsonl --out results/summary_n10.json
+```
+
+- **重要输出（建议保留的“最终报告”文件）**：
+	- `pipeline_n10_qwen.jsonl` — pipeline 原始逐样本输出（若存在）
+	- `experiment_n10.jsonl` — run_experiment 输出（主 jsonl）
+	- `summary_n10.json` — analyze_results 生成的汇总（ROUGE/NLI 支持率）
+	- `per_sample_results.csv` — 每个样本的表格视图（方便导入 Excel）
+	- `summary_results.json` / `summary_results_examples.jsonl` — 进一步的示例与汇总
+	- `test_pipeline.jsonl` — 调试用的小样本输出
+
+- **JSONL 每行字段（典型）**：
+	- `id`：样本唯一标识
+	- `reference`：参考摘要（gold）
+	- `prediction` 或 `fused`：融合摘要（模型生成）
+	- `sentences`：原文拆分句列表，每句包含 `text`, `nli_label`, `nli_per_evidence`（逐证据分数）
+	- `corrected`：纠错后的最终文本（若已运行纠错模块）
+	- `rouge`：ROUGE 各项分数字典
+	- `support_rate`：句级支持率（基于 NLI 判定的比例）
+
+- **如何产生 ROUGE 与句级 NLI 统计**：
+	1. `run_experiment.py` 在每条记录中计算并写入 `rouge` 与 `sentences`。  
+	2. `scripts/analyze_results.py` 汇总 jsonl 中的 `rouge`、`support_rate`，并写出 `summary_*.json` 与 `per_sample_results.csv`。
+
+- **测试与 CI（本地复现）**：
+	- 运行单元测试：
+
+```powershell
+pytest -q
+```
+
+	- 在本地模拟 CI smoke（Windows PowerShell）：
+
+```powershell
+.\ .github\ci\model_qa_smoke.ps1
+```
+
+	- 若在 Linux/macOS ：
+
+```bash
+bash .github/ci/model_qa_smoke.sh
+```
+
+	- 若 CI 报错请优先检查：`.env.local` 的离线缓存变量、`requirements.txt`（bitsandbytes 可选）、以及本地 Python 可执行路径（PowerShell 下优先使用 `.venv\Scripts\Activate.ps1`）。
+
+- **结果清理与归档**：
+	- 仓库包含简单的归档流程：将非最终报告文件移动到 `results/archive/<timestamp>/` 以便保留最小报告集合。示例（PowerShell）：
+
+```powershell
+$keep=@("pipeline_n10_qwen.jsonl","experiment_n10.jsonl","summary_n10.json","per_sample_results.csv","summary_results.json","summary_results_examples.jsonl","test_pipeline.jsonl");
+$arch="results/archive/<timestamp>/phase2"; New-Item -ItemType Directory -Force -Path $arch | Out-Null; Get-ChildItem -File results | Where-Object { $keep -notcontains $_.Name } | Move-Item -Destination $arch -Force
+```
+
+	- 每次归档会在 `results/archive/.../CLEANUP_NOTES.md` 追加移动记录。
+
+- **常见故障排查补充**：
+	- NLI 全为 `ERROR`：检查 `nli/nli_check.py` 是否抛出异常；在离线模式下确认模型文件完整且 `HF_HUB_OFFLINE=1`。  
+	- `prediction` 为空：在单样本模式下运行 `run_pipeline` 并检查 `fused` 字段；确认 summarizer 模型是否可用或回退到更小模型。  
+	- 检索不返回证据：确认 `data/cache` 下是否有已索引的 embedding，或重新运行索引构建：`from retrieval.retriever import Retriever; r=Retriever(...); r.build_index()`。
+
+- **提交与发布建议**：
+	- 我建议在确认所有本地测试通过后，把代码更改分支提交并发起 PR，变更包含：`nli` 修复、CI smoke 调整、README 更新、归档脚本。  
+
+如需，我可以直接把 README 中这些补充保存（我已添加），并可以同时生成一个更详尽的 `docs/` 页面或 `USAGE.md`，把命令、示例输出和 JSON 模式展开为可搜索的文档。告诉我是否需要我把 README 的这些更详细内容拆成单独文档并创建初始 files。 

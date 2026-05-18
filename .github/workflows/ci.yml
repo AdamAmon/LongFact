@@ -48,6 +48,12 @@ jobs:
           black --check . || true
           ruff check . || true
         shell: bash
-      - name: Run tests
+      - name: Run tests (Linux)
+        if: runner.os != 'Windows'
         run: pytest -q
         shell: bash
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: pytest -q
+        shell: pwsh

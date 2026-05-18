@@ -17,15 +17,14 @@ date_added: '2026-05-16'
 
 ## 本地操作示例
 ```powershell
-# 1) 采样并索引
-.venv\Scripts\python.exe data/load_govreport.py --out data/gov_sample.jsonl --n 100
-.venv\Scripts\python.exe retrieval/retriever.py --build-index data/gov_sample.jsonl --index-path index/gov.index
+# 1) 先做最小验证（CPU）
+python run_experiment.py --n 1 --device -1 --out results/nexus_n1.jsonl
 
-# 2) 运行实验（摘要+评估）
-.venv\Scripts\python.exe run_experiment.py --input data/gov_sample.jsonl --out results/exp_full.jsonl --sample-size 50
+# 2) 小规模实验（摘要 + 检索 + NLI + 纠错 + 评估）
+python run_experiment.py --n 10 --use_model --device -1 --out results/nexus_n10.jsonl
 
-# 3) 触发纠错（针对失败案例）
-.venv\Scripts\python.exe correction/corrector.py --input results/failures.jsonl --out results/corrections.jsonl
+# 3) 句级排障（当需要看每句证据与NLI时）
+python workflow/run_pipeline_simple.py --sample_size 1 --out results/nexus_pipeline_n1.jsonl --device -1
 ```
 
 ## 建议

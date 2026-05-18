@@ -22,11 +22,11 @@ date_added: '2026-05-16'
 ## 快速命令示例
 
 ```powershell
-# 检索并保存 top-5 证据到 results/evidence/
-.venv\Scripts\python.exe retrieval/retriever.py --query "示例断言文本" --top-k 5 --out results/evidence/claim_123.jsonl
+# 先产出句级证据与NLI信息
+python workflow/run_pipeline_simple.py --sample_size 1 --out results/zk_pipeline_n1.jsonl --device -1
 
-# 对检索证据执行 NLI 检测
-.venv\Scripts\python.exe nli/nli_check.py --evidence results/evidence/claim_123.jsonl --out results/evidence/claim_123.checked.jsonl
+# 基于 pipeline 输出提取失败/待复核句子（示例）
+python -c "import json; p='results/zk_pipeline_n1.jsonl'; rows=[json.loads(x) for x in open(p,encoding='utf-8')]; print(sum(1 for r in rows for s in r.get('sentences',[]) if not s.get('supported',False)))"
 ```
 
 ## 建议
