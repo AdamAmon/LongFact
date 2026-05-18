@@ -45,8 +45,8 @@ HF_HUB_OFFLINE=1
 ```powershell
 $env:HF_DATASETS_OFFLINE='1'
 $env:HF_HUB_OFFLINE='1'
-$env:HF_DATASETS_CACHE='D:\WBC\NJUniversity\LongFact\data\cache'
-$env:TRANSFORMERS_CACHE='D:\WBC\NJUniversity\LongFact\.hf-cache'
+$env:HF_DATASETS_CACHE='./data/cache'
+$env:TRANSFORMERS_CACHE='./.hf-cache'
 .\.venv\Scripts\python.exe run_experiment.py --n 1 --use_model --device -1
 ```
 

@@ -81,11 +81,16 @@ if ($joined -match $dangerPattern) {
 
 if ($eventName -eq 'PostToolUse' -and ($joined -match '(?i)\.py\b|apply_patch|create_file|edit_notebook_file')) {
     try {
-        Push-Location 'D:/WBC/NJUniversity/LongFact'
-        .\.venv\Scripts\python.exe -m compileall summarize retrieval nli correction eval data run_experiment.py | Out-Null
+        $repoRoot = Resolve-Path -Path (Join-Path $PSScriptRoot '..\..\..')
+        Push-Location $repoRoot.Path
+        & (Join-Path $repoRoot.Path '.venv\Scripts\python.exe') -m compileall summarize retrieval nli correction eval data run_experiment.py | Out-Null
         Pop-Location
     } catch {
-        if ((Get-Location).Path -ne 'D:\WBC\NJUniversity\LongFact') {
+        try {
+            if ($null -ne $repoRoot -and (Get-Location).Path -ne $repoRoot.Path) {
+                Pop-Location -ErrorAction SilentlyContinue
+            }
+        } catch {
             Pop-Location -ErrorAction SilentlyContinue
         }
     }

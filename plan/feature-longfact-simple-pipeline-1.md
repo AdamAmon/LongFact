@@ -8,118 +8,91 @@ status: "Planned"
 tags: ["feature", "longfact", "govreport", "summarization", "nli", "correction"]
 ---
 
+
 # Introduction
 
 ![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
 
-This plan defines the minimum executable implementation for LongFact task 3.1: GovReport long-document summarization, sentence-level factual consistency checking, and local correction using the default model combination:
-Qwen/Qwen2.5-1.5B-Instruct for summarization and correction, and facebook/bart-large-mnli for NLI verification.
+此计划文档为任务 3.1（Simple Task）的可执行实施方案：在 GovReport 验证集上实现并验证“分块摘要 → 句子级证据检索 → NLI 判定 → 局部纠错”的端到端流水线，产出可复现的代码、n=10 实验结果与案例集，后续可扩展至更大规模实验。
 
-## 1. Requirements & Constraints
+## 1. 要求与约束（摘要）
 
-- **REQ-001**: Load GovReport validation or test samples and export them to JSONL for reproducible experiments.
-- **REQ-002**: Generate summaries for long documents using Qwen/Qwen2.5-1.5B-Instruct as the primary summarization model.
-- **REQ-003**: Split generated summaries into sentences and evaluate each sentence separately.
-- **REQ-004**: Retrieve evidence passages from the source document before NLI classification.
-- **REQ-005**: Use facebook/bart-large-mnli for sentence-level entailment / support checking.
-- **REQ-006**: Apply local correction only to sentences that are not supported by evidence.
-- **REQ-007**: Re-run support checking after correction and compare pre- and post-correction outputs.
-- **REQ-008**: Keep a fallback execution path available when HuggingFace models, FAISS, or datasets are unavailable.
-- **REQ-009**: Support GPU summarization and correction on RTX 4060 8GB, but allow NLI to run on CPU.
-- **REQ-010**: Persist experiment outputs to JSON or JSONL files for later analysis and reporting.
-- **CON-001**: Do not remove the existing fallback pipeline.
-- **CON-002**: Keep CLI interfaces backward-compatible where possible.
-- **CON-003**: Avoid large refactors that change unrelated modules.
-- **GUD-001**: Prefer small, reversible changes that can be validated on a tiny sample before scaling.
-- **PAT-001**: Keep long-running model work behind explicit CLI flags.
+- 载入 GovReport 样本并可导出为 JSONL（可重复抽样）。
+- 使用默认模型组合：`Qwen/Qwen2.5-1.5B-Instruct`（摘要/纠错）与 `facebook/bart-large-mnli`（NLI）；检索默认 `sentence-transformers/all-MiniLM-L6-v2` + FAISS，BM25 为可选混合策略。
+- 将摘要按句拆分，对每句检索 top-k 证据并用 NLI 判定是否“支持”。
+- 仅对“不被支持”的句子执行证据约束的局部纠错，并在纠错后重新判定支持率。
+- 保持回退实现以便在无模型或无网络环境下验证流水线逻辑。
 
-## 2. Implementation Steps
+## 2. 高级实施步骤（按顺序）
 
-### Implementation Phase 1
+1) 环境与缓存确认
+	- 确认 `./.env.local`、`config.py` 的路径指向 `data/cache` 和 `.hf-cache`。
+	- 如需强制离线，启用 `HF_DATASETS_OFFLINE=1` 和 `HF_HUB_OFFLINE=1`。
 
-- GOAL-001: Stabilize data loading, document chunking, and summary generation around the default Qwen model.
+2) 单样本运行与 `run_pipeline` 调试
+	- 在单文档上运行 `run_pipeline` 并打印中间输出（`chunks`, `local_summaries`, `fused`），定位空输出或融合失败的根因。
+	- 调试示例：
 
-| Task | Description | Completed | Date |
-|------|-------------|-----------|------|
-| TASK-001 | Extend `data/load_govreport.py` to support reproducible sampling metadata such as split, sample size, and document length fields in exported records. | | |
-| TASK-002 | Update `summarize/model_summarizer.py` so the primary HF path can load `Qwen/Qwen2.5-1.5B-Instruct` with a safe fallback path when the model cannot be initialized. | | |
-| TASK-003 | Update `summarize/run_summarize.py` to support Qwen-style prompting, document chunking with a tunable chunk size, and JSON output for the fused summary and intermediate chunks. | | |
-| TASK-004 | Verify that the summary CLI still works in fallback mode with no model access and that the output schema remains stable. | | |
+	  ```powershell
+	  python -c "from summarize.run_summarize import run_pipeline; import json; doc='长文内容'; print(json.dumps(run_pipeline(doc, use_model=True, model_name=None, device=-1), ensure_ascii=False, indent=2))"
+	  ```
 
-### Implementation Phase 2
+3) 修复摘要融合或模型输出处理
+	- 若 `fused` 为空，检查 `summarize/model_summarizer.py` 的生成调用、停止词/截断处理与去噪逻辑；为空输出添加重试或回退（per-chunk 拼接）策略。
 
-- GOAL-002: Implement sentence-level evidence retrieval and NLI-based factual consistency checking.
+4) 验证检索与 NLI
+	- 在示例文档上确认 `retrieval/retriever.py` 返回的 top-k 证据与 `nli/nli_check.py.check_batch()` 的标签映射（entailment/neutral/contradiction → 支持/不支持）。
 
-| Task | Description | Completed | Date |
-|------|-------------|-----------|------|
-| TASK-005 | Refine `retrieval/retriever.py` to support document-passage indexing plus top-k evidence lookup for each summary sentence. | | |
-| TASK-006 | Keep BM25 optional and preserve embedding retrieval as the default evidence retrieval path. | | |
-| TASK-007 | Update `eval/evaluate.py` so sentence splitting, evidence lookup, and support-rate computation are deterministic and reusable by the experiment runner. | | |
-| TASK-008 | Update `nli/nli_check.py` to expose a CPU-safe sentence-pair entailment API using `facebook/bart-large-mnli` as the default model. | | |
-| TASK-009 | Validate the NLI path on a small document sample and confirm that entailment labels are mapped correctly to support decisions. | | |
+5) 验证纠错步骤
+	- 确认 `correction/corrector.py` 在传入原文证据与需改写句子时能输出合理改写，且仅替换被判“不被支持”的句子。
 
-### Implementation Phase 3
+6) 端到端小规模实验（n=10）与聚合分析
+	- 执行：
 
-- GOAL-003: Implement local correction and end-to-end experiment logging for the simple task.
+	  ```powershell
+	  python run_experiment.py --n 10 --use_model --device -1 --dataset_cache_dir data/cache --out results/experiment_n10.jsonl
+	  python scripts/analyze_results.py --in results/experiment_n10.jsonl --out results/summary_n10.json
+	  ```
 
-| Task | Description | Completed | Date |
-|------|-------------|-----------|------|
-| TASK-010 | Update `correction/corrector.py` so unsupported sentences are rewritten with evidence-constrained prompts using Qwen/Qwen2.5-1.5B-Instruct. | | |
-| TASK-011 | Ensure correction only rewrites unsupported sentences and preserves supported sentences unchanged in the final merged summary. | | |
-| TASK-012 | Update `run_experiment.py` to produce a complete record per sample with prediction, support details, corrected summary, and ROUGE before/after correction. | | |
-| TASK-013 | Add case-study export fields needed for later manual analysis of successful and failed corrections. | | |
-| TASK-014 | Validate the end-to-end pipeline on a tiny GovReport batch and confirm the JSONL output can be aggregated for reporting. | | |
+	- 验收：每条记录包含 `prediction`、`corrected`、`support_rate`、`rouge` 字段；`results/summary_n10.json` 给出总体统计。
 
-## 3. Alternatives
+7) 抽取并保存案例（至少 10 个）
+	- 从 `results/experiment_n10.jsonl` 挑选成功/失败纠错案例并保存为 `results/cases_n10.jsonl`，用于报告展示。
 
-- **ALT-001**: Use `google/flan-t5-large` as the primary summarizer. Rejected because the required default combination already specifies Qwen/Qwen2.5-1.5B-Instruct.
-- **ALT-002**: Keep NLI on GPU together with summarization. Rejected because the RTX 4060 8GB memory budget is tighter and CPU NLI is more stable for batch evaluation.
-- **ALT-003**: Rewrite entire summaries during correction. Rejected because the assignment explicitly prefers local sentence-level correction.
-- **ALT-004**: Replace embedding retrieval with a pure BM25 pipeline. Rejected because semantic retrieval is already available and BM25 should remain optional rather than exclusive.
+8) 撰写短报告与提交材料
 
-## 4. Dependencies
+## 已完成项（基于当前仓库状态）
 
-- **DEP-001**: `transformers` for summarization, correction, and NLI model loading.
-- **DEP-002**: `datasets` for GovReport loading.
-- **DEP-003**: `sentence-transformers` and `faiss-cpu` for passage retrieval.
-- **DEP-004**: `rank_bm25` for optional hybrid retrieval.
-- **DEP-005**: `rouge-score` for ROUGE computation.
-- **DEP-006**: Local GPU memory sufficient for Qwen/Qwen2.5-1.5B-Instruct inference with a lightweight loading strategy.
+- `retrieval/retriever.py` 的重要 bug 修复（已修复 BM25/numpy 导入相关问题） — 状态：Completed
+- `nli/nli_check.py` 新增 `check_batch` 批量接口 — 状态：Completed
+- 单元测试与集成测试已添加并通过（tests/*，6 passed） — 状态：Completed
+- `README.md` 已更新以反映当前实现与离线优先策略 — 状态：Completed
+- `.env.local` 已写入并包含 `HF_DATASETS_OFFLINE=1` 与 `HF_HUB_OFFLINE=1` — 状态：Completed
+- 已实现并使用 `scripts/analyze_results.py` 对 `results/experiment_n10.jsonl` 进行聚合分析，生成 `results/summary_n10.json` — 状态：Completed
+- 已运行 `run_experiment.py --n 10`，并写出 `results/experiment_n10.jsonl`（注意：部分 `prediction`/`corrected` 字段可能为空，需要单样本调试） — 状态：Completed (needs follow-up)
 
-## 5. Files
+## 标注说明
 
-- **FILE-001**: `data/load_govreport.py` for dataset sampling and export.
-- **FILE-002**: `summarize/model_summarizer.py` for Qwen loading and fallback summarization.
-- **FILE-003**: `summarize/run_summarize.py` for chunking, prompting, and summary fusion.
-- **FILE-004**: `retrieval/retriever.py` for evidence passage indexing and retrieval.
-- **FILE-005**: `nli/nli_check.py` for entailment-based support checking.
-- **FILE-006**: `correction/corrector.py` for evidence-constrained local rewriting.
-- **FILE-007**: `eval/evaluate.py` for sentence splitting, support rate, and ROUGE helpers.
-- **FILE-008**: `run_experiment.py` for end-to-end orchestration and JSONL logging.
-- **FILE-009**: `README.md` for usage documentation updates once the pipeline is finalized.
+- 标注为 `Completed` 的项表示仓库中已有相应实现或已在本地运行通过；对这些项不需要重复从零实现，但可能需要后续的 bug 修复或质量改进（在注记中以 `needs follow-up` 标明）。
 
-## 6. Testing
+	- 包含环境、参数、关键结果、10 个案例分析与结论。
 
-- **TEST-001**: Run `python data/load_govreport.py --split validation --sample_size 5 --out ...` and confirm the JSONL schema is valid.
-- **TEST-002**: Run `python summarize/run_summarize.py --input ... --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0` on a small local sample and confirm the fused summary is produced.
-- **TEST-003**: Run a tiny end-to-end batch through `run_experiment.py --n 2` and confirm prediction, support details, corrected summary, and ROUGE fields are present.
-- **TEST-004**: Verify fallback behavior by running the summarizer without model access and confirming the non-HF path still returns output.
-- **TEST-005**: Confirm NLI support-rate calculations remain stable on a fixed toy example where the expected entailment result is known.
+## 3. 验收准则
 
-## 7. Risks & Assumptions
+- 单样本调试：`run_pipeline` 必须能在单文档上输出非空的 `fused`（或明确的回退输出）。
+- n=10 运行：每条记录 `prediction` 字段非空或有回退文本，`results/summary_n10.json` 能给出 ROUGE 与 support_rate 聚合值。
+- 提供 `results/cases_n10.jsonl`（≥10 条案例）。
 
-- **RISK-001**: Qwen/Qwen2.5-1.5B-Instruct may be slow or fail to initialize on the local GPU if memory pressure is too high.
-- **RISK-002**: `facebook/bart-large-mnli` on CPU may become the bottleneck for 500+ samples if batch size is not controlled.
-- **RISK-003**: Evidence retrieval quality may limit NLI accuracy, especially when chunk boundaries split relevant facts.
-- **RISK-004**: Correction prompts may introduce new factual drift if they are too unconstrained.
-- **ASSUMPTION-001**: The dataset fields returned by GovReport are stable enough to support document and summary extraction through the existing loader.
-- **ASSUMPTION-002**: The project will continue to allow CPU fallback execution when GPU execution is not practical.
-- **ASSUMPTION-003**: The initial implementation only needs to satisfy task 3.1, not the analysis and advanced tasks.
+## 4. 风险与缓解
 
-## 8. Related Specifications / Further Reading
+- 风险：在 CPU 上运行大型模型慢。缓解：先用回退实现验证管道，然后在少量样本上用模型调试。
+- 风险：本地缓存缺失或损坏。缓解：检查 `.hf-cache` 快照文件并使用 `bootstrap_local.py --download-models` 预热。
 
-- [长文摘要事实一致性评测与纠错.md](../长文摘要事实一致性评测与纠错.md)
-- [README.md](../README.md)
-- https://huggingface.co/datasets/ccdv/govreport-summarization
-- https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct
-- https://huggingface.co/facebook/bart-large-mnli
+## 5. 下一步（我将执行）
+
+- 如你同意，我现在开始执行步骤 2（单样本 `run_pipeline` 调试），将把调试输出贴回以便我们定位并修复 `fused`/`prediction` 为空的问题。
+
+## 6. 参考链接
+
+- `README.md`, `summarize/run_summarize.py`, `nli/nli_check.py`, `retrieval/retriever.py`, `run_experiment.py`
+

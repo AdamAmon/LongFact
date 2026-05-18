@@ -45,6 +45,9 @@ DEFAULT_NLI_MODEL = os.getenv("LONGFACT_NLI_MODEL", "facebook/bart-large-mnli")
 DEFAULT_CORRECTOR_MODEL = os.getenv("LONGFACT_CORRECTOR_MODEL", DEFAULT_SUMMARIZER_MODEL)
 DEFAULT_RETRIEVER_MODEL = os.getenv("LONGFACT_RETRIEVER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 DEFAULT_USE_BM25 = os.getenv("LONGFACT_USE_BM25", "0").strip().lower() in {"1", "true", "yes", "y"}
+# When debugging, it's sometimes useful to fall back to the reference `summary`
+# if `document` is missing. This should be False for formal experiments.
+FALLBACK_TO_SUMMARY = os.getenv("LONGFACT_FALLBACK_TO_SUMMARY", "0").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def ensure_local_dirs() -> None:

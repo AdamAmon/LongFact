@@ -7,30 +7,100 @@ from typing import List, Dict, Optional
 from pathlib import Path
 
 try:
-    from datasets import load_dataset
+    from datasets import load_dataset, DownloadConfig
 except Exception:
     load_dataset = None
 
-from config import DEFAULT_DATA_DIR, DEFAULT_GOVREPORT_DATASET, ensure_local_dirs
+from config import DEFAULT_DATA_DIR, DEFAULT_GOVREPORT_DATASET, ensure_local_dirs, FALLBACK_TO_SUMMARY
 
 
 def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir: Optional[str] = None, dataset_name: Optional[str] = None):
     if load_dataset is None:
         raise ImportError('datasets is required to load GovReport')
     ensure_local_dirs()
-    ds = load_dataset(
-        dataset_name or DEFAULT_GOVREPORT_DATASET,
-        split=split,
-        cache_dir=cache_dir or str(DEFAULT_DATA_DIR),
-    )
+    download_cfg = None
+    try:
+        download_cfg = DownloadConfig(local_files_only=True)
+    except Exception:
+        download_cfg = None
+
+    # Prefer using a DownloadConfig to enforce local-only downloads; fall back
+    # to the local_files_only flag if DownloadConfig is unavailable.
+    try:
+        if download_cfg is not None:
+            ds = load_dataset(
+                dataset_name or DEFAULT_GOVREPORT_DATASET,
+                split=split,
+                cache_dir=cache_dir or str(DEFAULT_DATA_DIR),
+                download_config=download_cfg,
+            )
+        else:
+            ds = load_dataset(
+                dataset_name or DEFAULT_GOVREPORT_DATASET,
+                split=split,
+                cache_dir=cache_dir or str(DEFAULT_DATA_DIR),
+                local_files_only=True,
+            )
+    except ValueError:
+        # Some cached dataset packages use a specific config name (e.g. 'document').
+        # Retry with a common config name to be more resilient in offline mode.
+        if download_cfg is not None:
+            ds = load_dataset(
+                dataset_name or DEFAULT_GOVREPORT_DATASET,
+                name='document',
+                split=split,
+                cache_dir=cache_dir or str(DEFAULT_DATA_DIR),
+                download_config=download_cfg,
+            )
+        else:
+            ds = load_dataset(
+                dataset_name or DEFAULT_GOVREPORT_DATASET,
+                name='document',
+                split=split,
+                cache_dir=cache_dir or str(DEFAULT_DATA_DIR),
+                local_files_only=True,
+            )
     if sample_size is not None and sample_size > 0:
         ds = ds.select(range(min(sample_size, len(ds))))
     records = []
     for i, ex in enumerate(ds):
-        # dataset fields include 'document' and 'summary' typically
-        document = ex.get('document') or ex.get('article') or ex.get('text') or ''
+        # summary fields (dataset can use different names)
         summary = ex.get('summary') or ex.get('highlights') or ex.get('abstract') or ''
-        records.append({
+
+        # document/report fields: try multiple common names and handle nested/list types
+        document = ''
+        doc_field_candidates = ['document', 'report', 'article', 'text', 'content', 'body', 'doc']
+        for f in doc_field_candidates:
+            if f in ex and ex.get(f):
+                val = ex.get(f)
+                # list of strings -> join
+                if isinstance(val, (list, tuple)):
+                    document = ' '.join([str(x).strip() for x in val if x])
+                # nested dict -> try common inner keys
+                elif isinstance(val, dict):
+                    for sub in ('text', 'content', 'body', 'report', 'article'):
+                        if sub in val and val.get(sub):
+                            document = val.get(sub)
+                            break
+                    if not document:
+                        # fallback to string representation
+                        document = json.dumps(val, ensure_ascii=False)
+                else:
+                    document = str(val)
+                break
+
+        # If document is empty and fallback is enabled, use summary as fallback for debugging.
+        skipped = False
+        skip_reason = None
+        if not document or not str(document).strip():
+            if FALLBACK_TO_SUMMARY and summary:
+                document = summary
+                skip_reason = 'used_summary_as_fallback'
+            else:
+                skipped = True
+                skip_reason = 'missing_document'
+
+        rec = {
             'id': ex.get('id', i),
             'document': document,
             'summary': summary,
@@ -38,7 +108,10 @@ def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir:
             'dataset_name': dataset_name or DEFAULT_GOVREPORT_DATASET,
             'document_length': len(document),
             'summary_length': len(summary),
-        })
+            'skipped': skipped,
+            'skip_reason': skip_reason,
+        }
+        records.append(rec)
     return records
 
 

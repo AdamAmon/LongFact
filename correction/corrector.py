@@ -5,9 +5,10 @@
 from typing import List, Optional
 
 try:
-    from transformers import pipeline
+    from transformers import pipeline, GenerationConfig
 except Exception:
     pipeline = None
+    GenerationConfig = None
 
 from config import DEFAULT_CORRECTOR_MODEL
 
@@ -17,17 +18,25 @@ class Corrector:
         self.model_name = model_name
         self.device = device
         self.max_length = max_length
+        self.pipe = None
         if model_name and pipeline is not None:
             # prefer text2text for instruction models
+            gen_cfg = None
+            if GenerationConfig is not None:
+                gen_cfg = GenerationConfig(max_new_tokens=self.max_length)
             try:
-                self.pipe = pipeline('text2text-generation', model=model_name, device=device)
+                if gen_cfg is not None:
+                    self.pipe = pipeline('text2text-generation', model=model_name, device=device, generation_config=gen_cfg)
+                else:
+                    self.pipe = pipeline('text2text-generation', model=model_name, device=device)
             except Exception:
                 try:
-                    self.pipe = pipeline('text-generation', model=model_name, device=device)
+                    if gen_cfg is not None:
+                        self.pipe = pipeline('text-generation', model=model_name, device=device, generation_config=gen_cfg)
+                    else:
+                        self.pipe = pipeline('text-generation', model=model_name, device=device)
                 except Exception:
                     self.pipe = None
-        else:
-            self.pipe = None
 
     def construct_prompt(self, evidence: List[str], sentence: str) -> str:
         evid = '\n'.join([f'- {e}' for e in evidence[:5]])
@@ -46,7 +55,8 @@ class Corrector:
             # fallback: try to do minimal correction by returning original sentence
             return sentence
         try:
-            out = self.pipe(prompt, max_length=self.max_length, truncation=True)
+            # generation parameters are supplied via GenerationConfig at pipeline init-time
+            out = self.pipe(prompt)
             if isinstance(out, list) and len(out) > 0:
                 # text2text returns 'generated_text' key in many cases
                 return out[0].get('generated_text', out[0].get('summary_text', out[0].get('text', '')))

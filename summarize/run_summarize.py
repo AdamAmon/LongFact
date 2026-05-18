@@ -13,8 +13,16 @@ from summarize.model_summarizer import get_summarizer
 
 
 def chunk_text(text: str, max_tokens: int = 200) -> List[str]:
-    # 非严格 tokenizer，仅按句号分割并合并，作为占位实现
-    sents = [s.strip() for s in text.split('。') if s.strip()]
+    # 更稳健的句子切分：支持中文/英文标点（。.!?）并保留句末标点。
+    import re
+
+    raw_sents = [s.strip() for s in re.split(r'(?<=[。.!?])\s+', text) if s.strip()]
+    # Ensure sentences end with a punctuation mark
+    sents = []
+    for s in raw_sents:
+        if not re.search(r'[。.!?]$', s):
+            s = s + '。'
+        sents.append(s)
     chunks = []
     cur = []
     cur_len = 0
@@ -39,14 +47,28 @@ def fuse_summaries(local_summaries: List[str]) -> str:
 
 def run_pipeline(text: str, use_model: bool = False, model_name: str = None, device: int = -1):
     chunks = chunk_text(text)
-    summarizer = get_summarizer(model_name=model_name if use_model else None, device=device)
-    local_summaries = summarizer.summarize_chunks(chunks)
-    fused = fuse_summaries(local_summaries)
-    return {
-        'chunks': chunks,
-        'local_summaries': local_summaries,
-        'fused': fused,
-    }
+    result = {'chunks': chunks, 'local_summaries': [], 'fused': '', 'error': None}
+    try:
+        summarizer = get_summarizer(model_name=model_name if use_model else None, device=device)
+        # debug: log chunk counts
+        print(f'[run_pipeline] num_chunks={len(chunks)}')
+        local_summaries = summarizer.summarize_chunks(chunks)
+        print(f'[run_pipeline] local_summaries_count={len(local_summaries)}')
+        result['local_summaries'] = local_summaries
+        fused = fuse_summaries(local_summaries)
+        result['fused'] = fused
+        if not fused or not fused.strip():
+            result['error'] = 'generation_empty'
+            print('[run_pipeline] Warning: fused summary is empty')
+    except Exception as e:
+        # capture exception for downstream inspection
+        import traceback
+
+        tb = traceback.format_exc()
+        result['error'] = str(e)
+        print('[run_pipeline] Exception during summarization:')
+        print(tb)
+    return result
 
 
 def main():

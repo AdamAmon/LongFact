@@ -5,6 +5,7 @@ import argparse
 import json
 from config import DEFAULT_CORRECTOR_MODEL, DEFAULT_DATA_DIR, DEFAULT_NLI_MODEL, DEFAULT_SUMMARIZER_MODEL
 from data.load_govreport import load_govreport
+from config import FALLBACK_TO_SUMMARY
 from summarize.run_summarize import run_pipeline
 from retrieval.retriever import Retriever
 from nli.nli_check import NLIChecker
@@ -17,10 +18,26 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
     results = []
 
     for rec in records:
+        # skip samples that were flagged as missing document (unless fallback enabled)
+        if rec.get('skipped') and not FALLBACK_TO_SUMMARY:
+            results.append({
+                'id': rec['id'],
+                'reference': rec.get('summary', ''),
+                'prediction': '',
+                'corrected': '',
+                'support_rate': 0.0,
+                'rouge': {},
+                'rouge_corrected': {},
+                'details': [],
+                'error': 'skipped_missing_document',
+                'skip_reason': rec.get('skip_reason'),
+            })
+            continue
+
         doc = rec['document']
         ref = rec.get('summary', '') or ''
         out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device)
-        pred = out['fused']
+        pred = out.get('fused', '')
 
         # build retriever on document passages; simple chunking for evidence
         passages = out['chunks']
@@ -53,6 +70,13 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
             'rouge': rouge_scores,
             'rouge_corrected': rouge_corrected,
             'details': details,
+            # include summarization debug snapshot to help diagnose empty outputs
+            'summarization_debug': {
+                'chunks': out.get('chunks'),
+                'local_summaries': out.get('local_summaries'),
+                'fused': out.get('fused'),
+                'error': out.get('error'),
+            },
         })
 
     return results
