@@ -14,6 +14,13 @@ from retrieval.retriever import Retriever
 from nli.nli_check import NLIChecker
 from correction.corrector import Corrector
 from config import DEFAULT_SUMMARIZER_MODEL, DEFAULT_RETRIEVER_MODEL
+import time
+import math
+import statistics
+try:
+    import torch
+except Exception:
+    torch = None
 
 
 def split_sentences(text: str) -> List[str]:
@@ -51,6 +58,7 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
     for s in sents:
         evidence = []
         scores = []
+        start_retr = time.time()
         if retr is not None:
             try:
                 hits = retr.query(s, top_k=5, use_bm25_score=True)
@@ -59,30 +67,70 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
                     scores.append(score)
             except Exception:
                 evidence = []
+        end_retr = time.time()
 
-        # Compose premise as concatenation of top evidence
-        premise = '\n'.join(evidence[:3]) if evidence else doc[:2048]
-        try:
-            label, prob = nli.check(premise, s)
-        except Exception:
-            label, prob = 'ERROR', 0.0
+        # Per-evidence NLI checks and aggregation
+        nli_label = 'NO_EVIDENCE'
+        nli_score = 0.0
+        per_evidence = []
+        start_nli = time.time()
+        if evidence:
+            try:
+                # use per-evidence checks and aggregate by 'max'
+                nli_label, nli_score, per_evidence = nli.check_with_evidence(evidence, s, strategy='max')
+            except Exception:
+                nli_label, nli_score = 'ERROR', 0.0
+        else:
+            # fallback to using doc prefix as premise
+            premise = doc[:2048]
+            try:
+                nli_label, nli_score = nli.check(premise, s)
+                per_evidence = [(nli_label, nli_score, premise)]
+            except Exception:
+                nli_label, nli_score = 'ERROR', 0.0
+        end_nli = time.time()
 
-        supported = (label.upper() in ('ENTAILMENT', 'ENTAILS')) and prob >= 0.6
+        supported = (nli_label.upper() in ('ENTAILMENT', 'ENTAILS')) and nli_score >= 0.6
 
         corrected = s
+        nli_label_corrected = nli_label
+        nli_score_corrected = nli_score
+        supported_corrected = supported
+
+        start_corr = time.time()
         if not supported:
             try:
                 corrected = corr.correct(evidence, s)
             except Exception:
                 corrected = s
+            # Re-run per-evidence NLI on corrected sentence
+            try:
+                nli_label_corrected, nli_score_corrected, _ = nli.check_with_evidence(evidence, corrected, strategy='max')
+            except Exception:
+                nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
+            supported_corrected = (nli_label_corrected.upper() in ('ENTAILMENT', 'ENTAILS')) and nli_score_corrected >= 0.6
+        end_corr = time.time()
+
+        # timing summary for this sentence
+        timing = {
+            'retrieval_time': end_retr - start_retr if 'end_retr' in locals() else 0.0,
+            'nli_time': end_nli - start_nli if 'end_nli' in locals() else 0.0,
+            'correction_time': end_corr - start_corr if 'end_corr' in locals() else 0.0,
+        }
 
         sent_results.append({
             'sentence': s,
             'supported': supported,
-            'nli_label': label,
-            'nli_score': prob,
+            'nli_label': nli_label,
+            'nli_score': nli_score,
             'evidence': evidence,
             'corrected': corrected,
+            'nli_per_evidence': per_evidence,
+            'nli_label_corrected': nli_label_corrected,
+            'nli_score_corrected': nli_score_corrected,
+            'supported_corrected': supported_corrected,
+            'correction_effect': (True if (supported_corrected and not supported) else (False if (supported_corrected == supported) else None)),
+            'timing': timing,
         })
 
     out = {
@@ -90,6 +138,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
         'fused_summary': fused,
         'reference': ref,
         'sentences': sent_results,
+        'pipeline_timings': {
+            'total_sentences': len(sent_results),
+            'summarization_chunks': len(summ_result.get('chunks', [])),
+            'sentence_nli_times': [s.get('timing', {}).get('nli_time', 0.0) for s in sent_results],
+            'sentence_correction_times': [s.get('timing', {}).get('correction_time', 0.0) for s in sent_results],
+            'sentence_retrieval_times': [s.get('timing', {}).get('retrieval_time', 0.0) for s in sent_results],
+        }
     }
     return out
 
