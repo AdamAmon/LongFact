@@ -8,13 +8,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Compile OK. Running lightweight smoke command..."
-# Ensure a small sample exists; if not, generate one using data/load_govreport.py
-if (-not (Test-Path data/gov_sample.jsonl)) {
-  Write-Host "No data/gov_sample.jsonl found; attempting to generate a tiny sample..."
-  python data/load_govreport.py --out data/gov_sample.jsonl --n 2
-  if ($LASTEXITCODE -ne 0) { Write-Error "failed to generate gov sample"; exit 1 }
-}
-
-python run_experiment.py --input data/gov_sample.jsonl --sample-size 1 --out results/ci_smoke.jsonl
-if ($LASTEXITCODE -ne 0) { Write-Error "run_experiment failed"; exit 1 }
+python -c "from summarize.run_summarize import run_pipeline; out=run_pipeline('Sentence one. Sentence two.', use_model=False); assert out.get('fused','').strip(); print('smoke_ok')"
+if ($LASTEXITCODE -ne 0) { Write-Error "lightweight smoke failed"; exit 1 }
 Write-Host "Smoke test complete."

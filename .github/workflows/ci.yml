@@ -36,14 +36,13 @@ jobs:
           pip install ruff black pytest
       - name: Run compileall (repo only)
         run: python ./.github/ci/compile_repo.py
-      - name: Run smoke test (model_qa_smoke)
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            powershell -ExecutionPolicy Bypass -File ./.github/ci/model_qa_smoke.ps1
-          else
-            bash ./.github/ci/model_qa_smoke.sh
-          fi
-        shell: bash
+      - name: Run smoke test (Linux)
+        if: runner.os != 'Windows'
+        run: bash ./.github/ci/model_qa_smoke.sh
+      - name: Run smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/ci/model_qa_smoke.ps1
       - name: Code style checks
         run: |
           black --check . || true

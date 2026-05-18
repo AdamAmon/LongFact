@@ -2,6 +2,18 @@
 
 此仓库实现了一个可复现的实验流水线：数据采样 → 分块摘要 → 证据检索 → 句子级 NLI 判定 → 局部纠错 → 评估（ROUGE + 支持率）。README 已更新以反映当前实现、默认配置与离线优先流程。
 
+## 当前项目状态（2026-05）
+- 已完成 LongFact 简化流水线（摘要→检索→句子级 NLI→纠错→评估）并可在本地运行小规模样本（如 n=10）。
+- 已修复 NLI 聚合调用链关键问题：`check_with_evidence` 已作为 `NLIChecker` 类方法稳定运行，输出不再全量落入 `ERROR`。
+- 已提供结果汇总脚本：可从 jsonl 生成初步结果表（ROUGE 与句级 NLI统计）。
+- 已修复 GitHub Actions 中 smoke 阶段的不兼容调用，改为轻量、离线友好的快速检查。
+
+## CI 流水线说明
+- 工作流文件：`.github/workflows/ci.yml`
+- 当前 CI 主要步骤：依赖安装 → 编译检查 → 轻量 smoke 检查 → pytest。
+- 为提升跨平台稳定性，Windows 与 Linux 的 smoke 步骤已拆分执行（分别调用 `.ps1` / `.sh`）。
+- `bitsandbytes` 在 Windows 下改为可选（通过环境标记跳过安装），避免平台安装失败导致 CI 中断。
+
 ## 要点概览
 - 入口脚本：`run_experiment.py`（端到端 runner，采样→生成→检索→NLI→纠错→评估）
 - 分块与摘要：`summarize/run_summarize.py`、`summarize/model_summarizer.py`

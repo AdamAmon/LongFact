@@ -25,7 +25,10 @@ class Retriever:
             raise ImportError("sentence-transformers is required for Retriever")
         # device: -1 -> cpu, >=0 -> cuda:device
         device_str = 'cpu' if device == -1 else f'cuda:{device}'
-        self.model = SentenceTransformer(model_name, device=device_str)
+        try:
+            self.model = SentenceTransformer(model_name, device=device_str)
+        except TypeError:
+            self.model = SentenceTransformer(model_name)
         self.index = None
         self.corpus: List[str] = []
         self.use_bm25 = use_bm25 and (BM25Okapi is not None)

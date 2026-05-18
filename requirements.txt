@@ -2,7 +2,7 @@ torch>=1.13.0
 transformers>=4.30.0
 sentence-transformers>=2.2.2
 faiss-cpu>=1.7.3
-bitsandbytes>=0.39.0
+bitsandbytes>=0.39.0; platform_system != "Windows"
 datasets
 accelerate
 rouge-score
