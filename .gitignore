@@ -74,6 +74,20 @@ Thumbs.db
 .cache/
 __pycache__/
 
+# Pytest / testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtualenvs and tox
+.tox/
+.venv/
+
+# Mypy / editor caches
+.mypy_cache/
+.ropeproject/
+
 # Jupyter
 .ipynb_checkpoints/
 

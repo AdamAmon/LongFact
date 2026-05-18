@@ -41,6 +41,21 @@ class NLIChecker:
         label, score = self.check(premise, hypothesis)
         return (label.upper() in ('ENTAILMENT', 'ENTAILS')) and (score >= threshold)
 
+    def check_batch(self, premises: list, hypotheses: list) -> list:
+        """对多个 (premise, hypothesis) 批量判定，返回 [(label, score), ...].
+
+        This uses a single forward pass for efficiency when available.
+        """
+        if len(premises) != len(hypotheses):
+            raise ValueError("premises and hypotheses must have the same length")
+        inputs = self.tokenizer(premises, hypotheses, return_tensors='pt', truncation=True, padding=True, max_length=1024).to(self.device)
+        with torch.no_grad():
+            logits = self.model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)
+            max_scores, idxs = torch.max(probs, dim=-1)
+            labels = [self.id2label.get(int(i.item()), str(i.item())) for i in idxs]
+            return list(zip(labels, [float(s.item()) for s in max_scores]))
+
 
 def simple_demo():
     checker = NLIChecker()

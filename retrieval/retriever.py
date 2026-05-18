@@ -92,12 +92,11 @@ class Retriever:
         D, I = self.index.search(q_emb, top_k)
         emb_results = [(int(i), float(d)) for i, d in zip(I[0], D[0])]
 
-        if use_bm25 and self.bm25 is not None:
+        if use_bm25_score and self.bm25 is not None:
             tokenized_q = text.split()
             bm_scores = self.bm25.get_scores(tokenized_q)
             # take top_k by hybrid score: normalized emb + normalized bm25
             # normalize bm25
-            import numpy as np
             bm = np.array(bm_scores)
             if bm.max() > 0:
                 bm = bm / (bm.max())

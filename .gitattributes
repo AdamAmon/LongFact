@@ -44,3 +44,7 @@
 
 # Ensure shell scripts keep LF for CI
 .github/ci/*.sh text eol=lf
+
+# Ensure GitHub workflow files use LF
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf

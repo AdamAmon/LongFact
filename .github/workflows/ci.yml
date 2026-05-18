@@ -19,11 +19,21 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies (reproducible)
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
-        shell: bash
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # ensure CI tools are available for checks
+          pip install ruff black pytest
       - name: Run compileall (repo only)
         run: python ./.github/ci/compile_repo.py
       - name: Run smoke test (model_qa_smoke)
@@ -33,4 +43,12 @@ jobs:
           else
             bash ./.github/ci/model_qa_smoke.sh
           fi
+        shell: bash
+      - name: Code style checks
+        run: |
+          black --check . || true
+          ruff check . || true
+        shell: bash
+      - name: Run tests
+        run: pytest -q
         shell: bash

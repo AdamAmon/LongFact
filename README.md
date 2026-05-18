@@ -42,6 +42,20 @@ python bootstrap_local.py
 - 预热 GovReport 数据集缓存。
 - 预下载默认模型：`Qwen/Qwen2.5-1.5B-Instruct`、`facebook/bart-large-mnli`、`all-MiniLM-L6-v2`。
 
+### 本地引导与缓存（推荐）
+
+项目包含 `bootstrap_local.py` 用于一次性准备本地环境：写入 `.env.local`、安装依赖（可选）、预热 GovReport 数据集缓存，并预下载默认模型到项目内缓存。这能避免后续运行时在线拉取大文件，提升试验稳定性。
+
+示例（预热并写入 `.env.local`）：
+
+```powershell
+python bootstrap_local.py --write-env --download-dataset --download-models
+```
+
+默认位置：
+- 模型缓存：`./.hf-cache/models--<owner>--<name>/snapshots/<id>/`（含 `model.safetensors`、`tokenizer.json` 等）
+- 数据集缓存：`./data/cache/`
+
 如果你已经装好依赖，只想做缓存预热，也可以分别执行：
 
 ```powershell
@@ -76,6 +90,23 @@ python summarize/run_summarize.py --input path/to/document.txt --use_model --mod
 python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --dataset_cache_dir data/cache --out experiment_results.jsonl
 ```
 
+### 强制仅用本地缓存（完全离线）
+
+若需确保运行仅使用本地已下载的模型与数据（不会向 HF Hub 发起请求），可在 PowerShell 中设置离线环境变量并指向项目缓存：
+
+```powershell
+$env:HUGGINGFACE_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_CACHE = "D:\\WBC\\NJUniversity\\LongFact\\.hf-cache"
+$env:HF_DATASETS_CACHE = "D:\\WBC\\NJUniversity\\LongFact\\data\\cache"
+.\\.venv\\Scripts\\python.exe run_experiment.py --n 1 --use_model --device 0
+```
+
+另一种可靠做法是直接把 `--model_name` 指为本地 snapshot 路径：
+
+```powershell
+.\\.venv\\Scripts\\python.exe run_experiment.py --n 1 --use_model --device 0 --model_name "D:\\WBC\\NJUniversity\\LongFact\\.hf-cache\\models--Qwen--Qwen2.5-1.5B-Instruct\\snapshots\\<snapshot_id>"
+```
+
 ## 设备说明
 
 - `--device -1` 表示使用 CPU；`--device 0` 表示使用 GPU 0（若可用）。
@@ -91,6 +122,42 @@ python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instr
 - `data/`：数据下载/预处理脚本 — [data/load_govreport.py](data/load_govreport.py)
 - `run_experiment.py`：小样本端到端实验运行器
 
+## 运行测试与 CI（可复现）
+
+推荐在本地使用虚拟环境为开发和测试创建可重复的环境：
+
+1. 创建并激活虚拟环境（Windows PowerShell）：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+2. 安装依赖并运行测试：
+
+```powershell
+pip install --upgrade pip
+pip install -r requirements.txt
+# 安装本地检查工具
+pip install ruff black pytest
+pytest -q
+```
+
+3. 本仓库的 GitHub Actions CI 会在每次 push/PR 到 `main` 上执行：
+- 缓存并安装 `requirements.txt` 中的依赖（基于 requirements 的 hash）
+- 运行 `black --check` 与 `ruff check`（风格/静态检查）
+- 运行 `pytest`（单元/集成测试）
+
+CI 配置文件： [.github/workflows/ci.yml](.github/workflows/ci.yml)
+
+本地运行 CI 风格检查的简易命令：
+
+```powershell
+black --check .
+ruff check .
+pytest -q
+```
+
 ## 输出说明
 
 - `summarize/run_summarize.py --out <path>` 会将单条运行结果（包含 `chunks`、`local_summaries`、`fused`）写入指定 JSON 文件。
@@ -100,6 +167,26 @@ python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instr
 
 - 若数据量增大，建议预计算并持久化 FAISS 索引；`retrieval/retriever.py` 提供基础索引构建 API，可扩展为磁盘持久化。
 - NLI 模型（如 `facebook/bart-large-mnli`）可在 CPU 上运行以节省显存，但批量计算较慢。
+
+## 常见问题与排错
+
+- Git 在 Windows 上可能会在 `git add` 时显示 CRLF -> LF 的警告（行尾规范化）。仓库包含 `.gitattributes`，可按下列命令统一工作区格式：
+
+```powershell
+git add --renormalize .
+git commit -m "Normalize line endings"
+```
+
+- 如果脚本报 `ModuleNotFoundError`（例如找不到 `torch`），请激活虚拟环境并安装依赖：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+- 若模型下载中断或加载失败，请检查本地缓存目录（`.hf-cache/models--.../snapshots/<id>/`）是否包含 `model.safetensors` 与 `tokenizer.json`，并使用上文的“完全离线”方法强制从本地加载。
+
+- 如果 GPU 显存不足，尝试：使用 CPU（`--device -1`）、换小模型、或采用量化加载（bitsandbytes/4-bit）并调整 `transformers`/`accelerate` 配置。
 
 ## 准备推送
 
