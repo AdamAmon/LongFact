@@ -2,10 +2,24 @@
 
 LongFact 是一个面向 GovReport 长文摘要的本地可复现实验流水线，目标是把“长文摘要是否事实一致”拆成可验证的阶段：数据采样、分块摘要、证据检索、句子级 NLI 判定、局部纠错、ROUGE 与支持率评估。
 
+## 当前机器配置
+
+本仓库当前在以下机器上完成了 GPU 8-bit 验证：
+
+- GPU：NVIDIA GeForce RTX 4060 Laptop GPU
+- 显存：8 GB
+- 驱动：596.49
+- CUDA：13.2（`nvidia-smi` 显示）
+- PyTorch：2.5.1+cu121
+- `bitsandbytes`：已安装，可用
+
+基于这台机器，当前最合适的运行方式是 `Qwen/Qwen2.5-1.5B-Instruct` + `--device 0 --load_in_8bit`，不需要回退到 CPU。
+
 ## 当前状态
 
 - 核心流水线已可在本机运行：`run_experiment.py` 会串起采样 → 摘要 → 检索 → NLI → 纠错 → 评估。
 - 已验证 8-bit 路径可用：摘要、NLI、纠错都支持 `--load_in_8bit`，当前机器上已成功完成 500 样本运行。
+- 已验证当前机器适合直接跑 GPU 8-bit：RTX 4060 Laptop GPU，8GB 显存，`bitsandbytes` 可用。
 - 已修复批量 NLI 聚合：`NLIChecker.check_with_evidence()` 可用，并且 `eval/evaluate.py` 会优先使用它减少 forward 次数。
 - 已增加模块级缓存：`summarize/model_summarizer.py` 与 `correction/corrector.py` 避免在同一轮实验中反复加载大模型。
 - 已验证测试通过：`pytest -q tests/test_unit.py` 通过。
@@ -95,10 +109,22 @@ python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instr
 python run_experiment.py --n 500 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --load_in_8bit --dataset_cache_dir data/cache --out results/experiment_n500_qwen.jsonl
 ```
 
+当前机器建议优先使用的 8-bit 小样本验证命令：
+
+```powershell
+python run_experiment.py --n 5 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --load_in_8bit --dataset_cache_dir data/cache --out results/test_n5_8bit.jsonl
+```
+
 结果汇总：
 
 ```powershell
 python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out results/summary_n500_qwen.json
+```
+
+长度分桶与案例导出：
+
+```powershell
+python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out results/summary_n500_qwen.json --cases-out results/cases_n500_qwen.json --csv-out results/length_buckets_n500_qwen.csv
 ```
 
 ## 已验证结果
@@ -110,13 +136,22 @@ python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out 
   - 平均 `rouge1_fmeasure` 约为 `0.4811`
   - 500 条记录均包含 `prediction`、`corrected`、`support_rate`、`rouge`、`rouge_corrected`、`details`
 
+## 新增分析能力
+
+- 每条样本现在还会记录 `corrected_support_rate`、`prediction_length`、`corrected_length`、`support_rate_delta` 和 `rouge1_fmeasure_delta`。
+- `scripts/analyze_results.py` 现在会输出长度分桶统计，默认按摘要句子数分为 `1-3`、`4-6`、`7-10`、`11-15`、`16+` 五档。
+- 分析脚本支持额外导出案例文件和 CSV 表格，便于直接放进实验报告。
+
 ## 输出字段说明
 
 - `prediction`：摘要融合后的原始预测文本。
 - `corrected`：纠错后的文本。
 - `support_rate`：句子级支持率。
+- `corrected_support_rate`：纠错后摘要的支持率。
 - `rouge` / `rouge_corrected`：纠错前后 ROUGE 分数。
 - `details`：逐句 NLI 结果与证据。
+- `prediction_length` / `corrected_length`：摘要长度统计，便于做 3.2.1 的长度分桶分析。
+- `support_rate_delta` / `rouge1_fmeasure_delta`：纠错前后变化量，便于抽取成功和失败案例。
 - `summarization_debug`：分块、局部摘要、融合摘要与错误信息的调试快照。
 
 ## 已知限制
@@ -149,11 +184,19 @@ bash .github/ci/model_qa_smoke.sh
 - 如果 `prediction` 为空，先单样本运行 `run_pipeline`，检查 `fused` 是否为空。
 - 如果 NLI 全部异常，优先检查模型缓存、离线环境变量和 `nli/nli_check.py`。
 - 如果检索不返回证据，检查 `data/cache` 下的 GovReport 缓存和 `retrieval/retriever.py` 索引构建逻辑。
+- 如果要写 3.2.1 报告，优先看分析脚本生成的 `length_buckets` 和对应 CSV。
+- 如果要写 3.2.2 报告，优先看 `cases-out` 导出的成功与失败案例集。
 
 ## 提示
 
 - `run_experiment.py` 使用的是真实参数：`--n`、`--use_model`、`--model_name`、`--device`、`--load_in_8bit`、`--dataset_cache_dir`、`--out`。
 - `scripts/analyze_results.py` 使用 `--in` 和 `--out`，不是 `--input`。
 - Windows 下 `bitsandbytes` 为可选依赖，避免平台安装失败。
+
+## 提速方向
+
+- 保持 `--load_in_8bit`，这是当前机器上的主力加速方式。
+- 优先控制样本规模和 chunk 数，先用 5 到 10 个样本做冒烟验证，再扩大到正式规模。
+- 后续如果继续优化，优先考虑批量摘要、减少重复检索开销、以及缩短纠错模型输出长度。
 
 如果你接下来要继续优化纠错效果，建议先检查 `correction/corrector.py` 的模型输出是否足够简洁，再决定是否需要换更适合的纠错模型或调整 prompt。

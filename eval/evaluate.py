@@ -24,8 +24,21 @@ def compute_rouge(ref: str, pred: str) -> Dict[str, float]:
 
 
 def sentence_split(text: str) -> List[str]:
-    sents = [s.strip() for s in text.split('。') if s.strip()]
-    return [s + '。' for s in sents]
+    import re
+
+    if not text or not text.strip():
+        return []
+    # Support Chinese and English punctuation while keeping sentence boundaries.
+    parts = re.split(r'(?<=[。！？.!?])\s+', text.strip())
+    out = []
+    for p in parts:
+        s = p.strip()
+        if not s:
+            continue
+        if not re.search(r'[。！？.!?]$', s):
+            s = s + '。'
+        out.append(s)
+    return out
 
 
 def compute_support_rate(summary: str, document: str, retriever, nli_checker, top_k: int = 5, threshold: float = 0.6) -> Tuple[float, List[Dict]]:
@@ -39,23 +52,55 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
             hits = []
             evidences = []
         else:
-            hits = retriever.query(s, top_k=top_k)
-            evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
+            try:
+                hits = retriever.query(s, top_k=top_k)
+                evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('evaluate: retriever.query failed:', e)
+                print(tb)
+                details.append({
+                    'sentence': s,
+                    'supported': False,
+                    'best_label': 'ERROR',
+                    'best_score': 0.0,
+                    'evidences': [],
+                    'error': str(e),
+                    'last_error': tb,
+                })
+                continue
         # Use the NLI check_with_evidence aggregation to reduce forward passes
         if not evidences:
             details.append({'sentence': s, 'supported': False, 'best_label': None, 'best_score': 0.0, 'evidences': []})
             continue
 
         if hasattr(nli_checker, 'check_with_evidence'):
-            agg_label, agg_score, per = nli_checker.check_with_evidence(evidences, s, strategy='max')
-            # determine supported by checking if any per-evidence entailment meets threshold
-            is_sup = any((lab.upper() in ('ENTAILMENT', 'ENTAILS') and sc >= threshold) for lab, sc, _ in per)
-            # find best label/score
-            best_label = None
-            best_score = 0.0
-            if per:
-                best = max(per, key=lambda x: x[1])
-                best_label, best_score = best[0], best[1]
+            try:
+                agg_label, agg_score, per = nli_checker.check_with_evidence(evidences, s, strategy='max')
+                # determine supported by checking if any per-evidence entailment meets threshold
+                is_sup = any((lab.upper() in ('ENTAILMENT', 'ENTAILS') and sc >= threshold) for lab, sc, _ in per)
+                # find best label/score
+                best_label = None
+                best_score = 0.0
+                if per:
+                    best = max(per, key=lambda x: x[1])
+                    best_label, best_score = best[0], best[1]
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('evaluate: nli.check_with_evidence failed:', e)
+                print(tb)
+                details.append({
+                    'sentence': s,
+                    'supported': False,
+                    'best_label': 'ERROR',
+                    'best_score': 0.0,
+                    'evidences': evidences[:3],
+                    'error': str(e),
+                    'last_error': tb,
+                })
+                continue
         else:
             # fallback to older interface where only `check` exists on nli_checker
             is_sup = False

@@ -45,11 +45,25 @@ def fuse_summaries(local_summaries: List[str]) -> str:
     return ' '.join(local_summaries)
 
 
-def run_pipeline(text: str, use_model: bool = False, model_name: str = None, device: int = -1, load_in_8bit: bool = False):
+def run_pipeline(
+    text: str,
+    use_model: bool = False,
+    model_name: str = None,
+    device: int = -1,
+    load_in_8bit: bool = False,
+    summary_max_new_tokens: int = 256,
+    summary_batch_size: int = 1,
+):
     chunks = chunk_text(text)
     result = {'chunks': chunks, 'local_summaries': [], 'fused': '', 'error': None}
     try:
-        summarizer = get_summarizer(model_name=model_name if use_model else None, device=device, load_in_8bit=load_in_8bit)
+        summarizer = get_summarizer(
+            model_name=model_name if use_model else None,
+            device=device,
+            load_in_8bit=load_in_8bit,
+            max_length=summary_max_new_tokens,
+            batch_size=summary_batch_size,
+        )
         # debug: log chunk counts
         print(f'[run_pipeline] num_chunks={len(chunks)}')
         local_summaries = summarizer.summarize_chunks(chunks)
@@ -79,6 +93,8 @@ def main():
     parser.add_argument('--device', type=int, default=-1, help='模型设备: -1=CPU, >=0 GPU id')
     parser.add_argument('--chunk_size', type=int, default=200, help='分块时的最大长度近似值')
     parser.add_argument('--load_in_8bit', action='store_true', help='尝试使用 bitsandbytes 的 8-bit 加载（若可用）')
+    parser.add_argument('--summary_max_new_tokens', type=int, default=256, help='每个 chunk 摘要生成的最大 token 数')
+    parser.add_argument('--summary_batch_size', type=int, default=1, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
     parser.add_argument('--out', type=str, default=None, help='可选：输出 jsonl 路径，保存生成结果')
     args = parser.parse_args()
     inp = args.input
@@ -90,7 +106,13 @@ def main():
         text = inp
 
     chunks = chunk_text(text, max_tokens=args.chunk_size)
-    summarizer = get_summarizer(model_name=args.model_name if args.use_model else None, device=args.device, load_in_8bit=args.load_in_8bit)
+    summarizer = get_summarizer(
+        model_name=args.model_name if args.use_model else None,
+        device=args.device,
+        load_in_8bit=args.load_in_8bit,
+        max_length=args.summary_max_new_tokens,
+        batch_size=args.summary_batch_size,
+    )
     local_summaries = summarizer.summarize_chunks(chunks)
     fused = fuse_summaries(local_summaries)
     out = {

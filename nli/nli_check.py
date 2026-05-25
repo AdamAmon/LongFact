@@ -10,9 +10,11 @@ import traceback
 
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import BitsAndBytesConfig
 except Exception as e:
     AutoTokenizer = None
     AutoModelForSequenceClassification = None
+    BitsAndBytesConfig = None
     print('nli_check: transformers import failed:', e)
     traceback.print_exc()
 
@@ -26,10 +28,16 @@ class NLIChecker:
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         # Support 8-bit loading via bitsandbytes when requested
-        if load_in_8bit:
+        if load_in_8bit and BitsAndBytesConfig is not None:
             try:
                 # device_map='auto' will place parameters on GPU where possible
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
+                bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    model_name,
+                    device_map='auto',
+                    quantization_config=bnb_cfg,
+                    trust_remote_code=True,
+                )
             except Exception as e:
                 print(f'nli_check: 8bit load failed for {model_name}:', e)
                 traceback.print_exc()

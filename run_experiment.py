@@ -10,10 +10,28 @@ from summarize.run_summarize import run_pipeline
 from retrieval.retriever import Retriever
 from nli.nli_check import NLIChecker
 from correction.corrector import Corrector
-from eval.evaluate import compute_rouge, compute_support_rate
+from eval.evaluate import compute_rouge, compute_support_rate, sentence_split
 
 
-def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str = None, device: int = -1, dataset_cache_dir: str = None, load_in_8bit: bool = False):
+def _summary_length_stats(text: str) -> dict:
+    sentences = sentence_split(text) if text and text.strip() else []
+    return {
+        'sentence_count': len(sentences),
+        'char_count': len(text or ''),
+        'token_count': len((text or '').split()),
+    }
+
+
+def run_sample(
+    sample_count: int = 10,
+    use_model: bool = False,
+    model_name: str = None,
+    device: int = -1,
+    dataset_cache_dir: str = None,
+    load_in_8bit: bool = False,
+    summary_max_new_tokens: int = 256,
+    summary_batch_size: int = 1,
+):
     records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR))
     results = []
 
@@ -43,7 +61,15 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
         try:
             doc = rec['document']
             ref = rec.get('summary', '') or ''
-            out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device, load_in_8bit=load_in_8bit)
+            out = run_pipeline(
+                doc,
+                use_model=use_model,
+                model_name=model_name,
+                device=device,
+                load_in_8bit=load_in_8bit,
+                summary_max_new_tokens=summary_max_new_tokens,
+                summary_batch_size=summary_batch_size,
+            )
             pred = out.get('fused', '')
             summ_error = out.get('error')
 
@@ -80,6 +106,8 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
                     corrected_sents.append(d.get('sentence', ''))
             corrected_pred = ' '.join(corrected_sents)
 
+            corrected_support_rate, corrected_details = compute_support_rate(corrected_pred, doc, retr, nli, top_k=3)
+
             try:
                 rouge_scores = compute_rouge(ref, pred) if ref else {}
             except Exception as e:
@@ -98,6 +126,11 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
                 print(tb)
                 rouge_corrected = {}
 
+            prediction_length = _summary_length_stats(pred)
+            corrected_length = _summary_length_stats(corrected_pred)
+            rouge1 = rouge_scores.get('rouge1_fmeasure', 0.0)
+            rouge1_corrected = rouge_corrected.get('rouge1_fmeasure', 0.0)
+
             results.append({
                 'id': rec['id'],
                 'reference': ref,
@@ -105,12 +138,18 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
                 'fused_summary': pred,
                 'corrected': corrected_pred,
                 'support_rate': support_rate,
+                'corrected_support_rate': corrected_support_rate,
                 'rouge': rouge_scores,
                 'rouge_corrected': rouge_corrected,
                 'details': details,
+                'corrected_details': corrected_details,
                 'sentences': details,
                 'error': sample_error or summ_error,
                 'last_error': sample_last_error or getattr(corr, 'last_error', None) or getattr(nli, 'last_error', None) or summ_error,
+                'prediction_length': prediction_length,
+                'corrected_length': corrected_length,
+                'support_rate_delta': corrected_support_rate - support_rate,
+                'rouge1_fmeasure_delta': rouge1_corrected - rouge1,
                 # include summarization debug snapshot to help diagnose empty outputs
                 'summarization_debug': {
                     'chunks': out.get('chunks'),
@@ -151,11 +190,22 @@ def main():
     parser.add_argument('--model_name', type=str, default=DEFAULT_SUMMARIZER_MODEL)
     parser.add_argument('--device', type=int, default=-1)
     parser.add_argument('--load_in_8bit', action='store_true', help='尝试使用 bitsandbytes 的 8-bit 加载（若可用）')
+    parser.add_argument('--summary_max_new_tokens', type=int, default=256, help='每个 chunk 摘要生成的最大 token 数')
+    parser.add_argument('--summary_batch_size', type=int, default=1, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
     parser.add_argument('--out', type=str, default='experiment_results.jsonl')
     args = parser.parse_args()
 
-    res = run_sample(sample_count=args.n, use_model=args.use_model, model_name=args.model_name, device=args.device, dataset_cache_dir=args.dataset_cache_dir, load_in_8bit=args.load_in_8bit)
+    res = run_sample(
+        sample_count=args.n,
+        use_model=args.use_model,
+        model_name=args.model_name,
+        device=args.device,
+        dataset_cache_dir=args.dataset_cache_dir,
+        load_in_8bit=args.load_in_8bit,
+        summary_max_new_tokens=args.summary_max_new_tokens,
+        summary_batch_size=args.summary_batch_size,
+    )
     with open(args.out, 'w', encoding='utf-8') as f:
         for r in res:
             f.write(json.dumps(r, ensure_ascii=False) + '\n')
