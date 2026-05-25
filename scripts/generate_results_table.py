@@ -16,11 +16,14 @@ import statistics
 
 try:
     from rouge_score import rouge_scorer
-except Exception:
+except Exception as e:
+    import traceback
+    print('generate_results_table: rouge_score import failed:', e)
+    traceback.print_exc()
     raise SystemExit('Please install rouge-score: pip install rouge-score')
 
 
-def compute(in_path, out_csv, out_summary):
+def compute(in_path, out_csv, out_summary, examples_limit=10):
     scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
 
     rows = []
@@ -39,20 +42,22 @@ def compute(in_path, out_csv, out_summary):
             obj = json.loads(line)
             idx = obj.get('id')
             ref = obj.get('reference', '') or ''
-            hyp = obj.get('fused_summary', '') or ''
+            # support multiple possible keys for the fused/hypothesis text
+            hyp = obj.get('fused_summary') or obj.get('fused') or obj.get('prediction') or ''
 
             scores = scorer.score(ref, hyp)
             r1 = scores['rouge1'].fmeasure
             r2 = scores['rouge2'].fmeasure
             rl = scores['rougeL'].fmeasure
 
-            sentences = obj.get('sentences', []) or []
+            # sentence-level details may be under 'sentences' or 'details'
+            sentences = obj.get('sentences') or obj.get('details') or []
             n_sent = len(sentences)
             n_supported = sum(1 for s in sentences if s.get('supported'))
 
             nli_counts = Counter()
             for s in sentences:
-                lbl = s.get('nli_label') or s.get('label') or 'neutral'
+                lbl = s.get('nli_label') or s.get('best_label') or s.get('label') or 'neutral'
                 nli_counts[lbl] += 1
                 global_nli[lbl] += 1
 
@@ -64,39 +69,48 @@ def compute(in_path, out_csv, out_summary):
                 if s.get('supported_corrected'):
                     supported_after += 1
                 eff = s.get('correction_effect')
+                # normalize common field names for examples
+                sent_text = s.get('sentence') or s.get('text') or s.get('local_summary') or s.get('generated_text')
+                evidence = s.get('evidence') or s.get('evidences') or s.get('evidences_list')
+                nli_before = s.get('nli_label') or s.get('best_label') or s.get('label')
+                nli_score_before = s.get('nli_score') or s.get('best_score')
+                corrected_text = s.get('corrected') or s.get('corrected_text') or s.get('corrected_summary')
+                nli_after = s.get('nli_label_corrected') or s.get('nli_label_after')
+                nli_score_after = s.get('nli_score_corrected') or s.get('nli_score_after')
+
                 if eff is True:
                     improved_examples.append({
                         'id': idx,
-                        'sentence': s.get('sentence'),
-                        'evidence': s.get('evidence'),
-                        'nli_label_before': s.get('nli_label'),
-                        'nli_score_before': s.get('nli_score'),
-                        'corrected': s.get('corrected'),
-                        'nli_label_after': s.get('nli_label_corrected'),
-                        'nli_score_after': s.get('nli_score_corrected'),
+                        'sentence': sent_text,
+                        'evidence': evidence,
+                        'nli_label_before': nli_before,
+                        'nli_score_before': nli_score_before,
+                        'corrected': corrected_text,
+                        'nli_label_after': nli_after,
+                        'nli_score_after': nli_score_after,
                     })
                 elif eff is False:
                     unchanged_examples.append({
                         'id': idx,
-                        'sentence': s.get('sentence'),
-                        'evidence': s.get('evidence'),
-                        'nli_label_before': s.get('nli_label'),
-                        'nli_score_before': s.get('nli_score'),
-                        'corrected': s.get('corrected'),
-                        'nli_label_after': s.get('nli_label_corrected'),
-                        'nli_score_after': s.get('nli_score_corrected'),
+                        'sentence': sent_text,
+                        'evidence': evidence,
+                        'nli_label_before': nli_before,
+                        'nli_score_before': nli_score_before,
+                        'corrected': corrected_text,
+                        'nli_label_after': nli_after,
+                        'nli_score_after': nli_score_after,
                     })
                 else:
                     # None or other -> consider as unchanged/unknown
                     unknown_examples.append({
                         'id': idx,
-                        'sentence': s.get('sentence'),
-                        'evidence': s.get('evidence'),
-                        'nli_label_before': s.get('nli_label'),
-                        'nli_score_before': s.get('nli_score'),
-                        'corrected': s.get('corrected'),
-                        'nli_label_after': s.get('nli_label_corrected'),
-                        'nli_score_after': s.get('nli_score_corrected'),
+                        'sentence': sent_text,
+                        'evidence': evidence,
+                        'nli_label_before': nli_before,
+                        'nli_score_before': nli_score_before,
+                        'corrected': corrected_text,
+                        'nli_label_after': nli_after,
+                        'nli_score_after': nli_score_after,
                     })
 
             row = {
@@ -150,8 +164,12 @@ def compute(in_path, out_csv, out_summary):
     # save example cases
     examples_out = out_summary.replace('.json', '_examples.jsonl')
     with open(examples_out, 'w', encoding='utf-8') as exf:
-        # write up to 10 examples: mix improved and unchanged
-        selected = improved_examples[:5] + unchanged_examples[:5]
+        # write examples: if examples_limit==0 -> write ALL examples; otherwise cap
+        if examples_limit == 0:
+            selected = improved_examples + unchanged_examples + unknown_examples
+        else:
+            half = max(1, examples_limit // 2)
+            selected = improved_examples[:half] + unchanged_examples[:half]
         for item in selected:
             exf.write(json.dumps(item, ensure_ascii=False) + '\n')
     print('Wrote examples to:', examples_out)
@@ -165,8 +183,9 @@ def main():
     p.add_argument('--in', dest='in_path', default='results/pipeline_n10_qwen.jsonl')
     p.add_argument('--out-csv', dest='out_csv', default='results/per_sample_results.csv')
     p.add_argument('--out-summary', dest='out_summary', default='results/summary_results.json')
+    p.add_argument('--examples', dest='examples', type=int, default=10, help='number of example cases to write; 0 for all')
     args = p.parse_args()
-    compute(args.in_path, args.out_csv, args.out_summary)
+    compute(args.in_path, args.out_csv, args.out_summary, examples_limit=args.examples)
 
 
 if __name__ == '__main__':

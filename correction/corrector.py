@@ -7,16 +7,24 @@ from typing import List, Optional
 
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
-except Exception:
+except Exception as e:
     pipeline = None
     AutoTokenizer = None
     AutoModelForSeq2SeqLM = None
     AutoModelForCausalLM = None
+    import traceback
+    print('corrector: transformers import failed:', e)
+    traceback_text = traceback.format_exc()
+    traceback.print_exc()
 
 try:
     from transformers import BitsAndBytesConfig
-except Exception:
+except Exception as e:
     BitsAndBytesConfig = None
+    import traceback
+    print('corrector: BitsAndBytesConfig import failed:', e)
+    traceback_text = traceback.format_exc()
+    traceback.print_exc()
 
 from config import DEFAULT_CORRECTOR_MODEL
 
@@ -44,29 +52,57 @@ class Corrector:
                 try:
                     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
                     quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
-                    if AutoModelForSeq2SeqLM is not None:
+                    # Qwen-style corrector models are causal LMs, so prefer the causal path first.
+                    if AutoModelForCausalLM is not None:
+                        try:
+                            model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                            self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer)
+                        except Exception as e:
+                            import traceback
+                            tb = traceback.format_exc()
+                            print(f'corrector: causal 8bit load failed for {model_name}:', e)
+                            print(tb)
+                            self.last_error = tb
+                            self.pipe = None
+                    if self.pipe is None and AutoModelForSeq2SeqLM is not None:
                         try:
                             model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
                             self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer)
-                        except Exception:
+                        except Exception as e:
+                            import traceback
+                            tb = traceback.format_exc()
+                            print(f'corrector: seq2seq 8bit load failed for {model_name}:', e)
+                            print(tb)
+                            self.last_error = tb
                             self.pipe = None
-                    if self.pipe is None and AutoModelForCausalLM is not None:
-                        model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
-                        self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer)
                     if self.pipe is not None:
                         _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
                         return
-                except Exception:
-                    # fall through to normal pipeline loader
+                except Exception as e:
+                    # fall through to normal pipeline loader but log
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f'corrector: 8bit pipeline attempt failed for {model_name}:', e)
+                    print(tb)
+                    self.last_error = tb
                     self.pipe = None
 
             if self.pipe is None:
                 try:
-                    self.pipe = pipeline('text2text-generation', model=model_name, device=device)
-                except Exception:
+                    self.pipe = pipeline('text-generation', model=model_name, device=device)
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f'corrector: text-generation pipeline load failed for {model_name}:', e)
+                    print(tb)
+                    self.last_error = tb
                     try:
-                        self.pipe = pipeline('text-generation', model=model_name, device=device)
-                    except Exception:
+                        self.pipe = pipeline('text2text-generation', model=model_name, device=device)
+                    except Exception as e2:
+                        tb2 = traceback.format_exc()
+                        print(f'corrector: text2text pipeline load also failed for {model_name}:', e2)
+                        print(tb2)
+                        self.last_error = (self.last_error or '') + '\n' + tb2
                         self.pipe = None
         # cache the loaded pipeline (or None) to avoid re-loading across samples
         _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
@@ -122,12 +158,16 @@ class Corrector:
                     generated = self._normalize_generation(prompt, generated)
                 self.last_error = None
                 return generated or sentence
+            # empty output
             self.last_error = 'corrector returned empty output'
-        except Exception as exc:
-            self.last_error = f'{type(exc).__name__}: {exc}'
             return sentence
-        self.last_error = 'corrector returned empty output'
-        return sentence
+        except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            print(f'corrector: generation failed for model {self.model_name}:', exc)
+            print(tb)
+            self.last_error = tb
+            return sentence
 
 
 def simple_demo():

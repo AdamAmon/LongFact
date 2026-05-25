@@ -9,14 +9,20 @@ import numpy as np
 try:
     from sentence_transformers import SentenceTransformer
     import faiss
-except Exception:
+except Exception as e:
     SentenceTransformer = None
     faiss = None
+    import traceback
+    print('retriever: optional imports failed:', e)
+    traceback.print_exc()
 
 try:
     from rank_bm25 import BM25Okapi
-except Exception:
+except Exception as e:
     BM25Okapi = None
+    import traceback
+    print('retriever: rank_bm25 import failed:', e)
+    traceback.print_exc()
 
 
 class Retriever:
@@ -25,6 +31,7 @@ class Retriever:
             raise ImportError("sentence-transformers is required for Retriever")
         # device: -1 -> cpu, >=0 -> cuda:device
         device_str = 'cpu' if device == -1 else f'cuda:{device}'
+        self.last_error = None
         try:
             self.model = SentenceTransformer(model_name, device=device_str)
         except TypeError:
@@ -45,7 +52,17 @@ class Retriever:
             self.bm25 = None
             return
 
-        embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
+        try:
+            embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print('[Retriever] build_index encode failed:', e)
+            print(tb)
+            self.last_error = tb
+            self.index = None
+            self.bm25 = None
+            raise
         # normalize embedding output to a 2D numpy array
         if isinstance(embs, list):
             embs = np.array(embs)
@@ -55,8 +72,12 @@ class Retriever:
         # debug info for unexpected embedding shapes
         try:
             print(f"[Retriever] build_index: passages={len(passages)} filtered={len(filtered)} embs_type={type(embs)} embs_shape={embs.shape}")
-        except Exception:
-            print(f"[Retriever] build_index: passages={len(passages)} filtered={len(filtered)} embs_type={type(embs)} (no shape)")
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[Retriever] build_index: passages={len(passages)} filtered={len(filtered)} embs_type={type(embs)} (no shape); error:", e)
+            print(tb)
+            self.last_error = tb
 
         if embs.size == 0:
             # unexpected: treat as no index
@@ -89,7 +110,15 @@ class Retriever:
         if self.index is None:
             raise RuntimeError("Index not built. Call build_index() first.")
 
-        q_emb = self.model.encode([text], convert_to_numpy=True)
+        try:
+            q_emb = self.model.encode([text], convert_to_numpy=True)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print('[Retriever] query encode failed:', e)
+            print(tb)
+            self.last_error = tb
+            raise
         q_emb = np.asarray(q_emb)
         if q_emb.ndim == 1:
             q_emb = q_emb.reshape(1, -1)

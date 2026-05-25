@@ -19,8 +19,11 @@ import math
 import statistics
 try:
     import torch
-except Exception:
+except Exception as e:
     torch = None
+    import traceback
+    print('run_pipeline_simple: torch import failed:', e)
+    traceback.print_exc()
 
 
 def split_sentences(text: str) -> List[str]:
@@ -32,6 +35,8 @@ def split_sentences(text: str) -> List[str]:
 def run_one(record, summarizer_model: str, retriever_model: str, device: int = -1):
     doc = record['document']
     ref = record.get('summary', '')
+    sample_error = None
+    sample_last_error = None
     # 1) summarize
     summ_result = run_pipeline(doc, use_model=True, model_name=summarizer_model, device=device)
     fused = summ_result.get('fused', '')
@@ -45,7 +50,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
     try:
         retr = Retriever(model_name=retriever_model, use_bm25=True)
         retr.build_index(passages)
-    except Exception:
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f'run_pipeline_simple: retriever build failed for id={record.get("id")}:', e)
+        print(tb)
+        sample_error = 'retriever_build_failed'
+        sample_last_error = tb
         retr = None
 
     # 4) nli checker
@@ -65,7 +76,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
                 for idx, score in hits:
                     evidence.append(passages[idx])
                     scores.append(score)
-            except Exception:
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f'run_pipeline_simple: retriever.query failed for id={record.get("id")}:', e)
+                print(tb)
+                sample_error = sample_error or 'retriever_query_failed'
+                sample_last_error = tb
                 evidence = []
         end_retr = time.time()
 
@@ -78,7 +95,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
             try:
                 # use per-evidence checks and aggregate by 'max'
                 nli_label, nli_score, per_evidence = nli.check_with_evidence(evidence, s, strategy='max')
-            except Exception:
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f'run_pipeline_simple: nli.check_with_evidence failed for id={record.get("id")}:', e)
+                print(tb)
+                sample_error = sample_error or 'nli_failed'
+                sample_last_error = tb
                 nli_label, nli_score = 'ERROR', 0.0
         else:
             # fallback to using doc prefix as premise
@@ -86,7 +109,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
             try:
                 nli_label, nli_score = nli.check(premise, s)
                 per_evidence = [(nli_label, nli_score, premise)]
-            except Exception:
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f'run_pipeline_simple: nli.check fallback failed for id={record.get("id")}:', e)
+                print(tb)
+                sample_error = sample_error or 'nli_fallback_failed'
+                sample_last_error = tb
                 nli_label, nli_score = 'ERROR', 0.0
         end_nli = time.time()
 
@@ -101,13 +130,38 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
         if not supported:
             try:
                 corrected = corr.correct(evidence, s)
-            except Exception:
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f'run_pipeline_simple: corrector.correct failed for id={record.get("id")}:', e)
+                print(tb)
+                sample_error = sample_error or 'corrector_failed'
+                sample_last_error = tb
                 corrected = s
             # Re-run per-evidence NLI on corrected sentence
-            try:
-                nli_label_corrected, nli_score_corrected, _ = nli.check_with_evidence(evidence, corrected, strategy='max')
-            except Exception:
-                nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
+            if evidence:
+                try:
+                    nli_label_corrected, nli_score_corrected, _ = nli.check_with_evidence(evidence, corrected, strategy='max')
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f'run_pipeline_simple: nli.check_with_evidence (post-correction) failed for id={record.get("id")}:', e)
+                    print(tb)
+                    sample_error = sample_error or 'post_correction_nli_failed'
+                    sample_last_error = tb
+                    nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
+            else:
+                premise = doc[:2048]
+                try:
+                    nli_label_corrected, nli_score_corrected = nli.check(premise, corrected)
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f'run_pipeline_simple: post-correction fallback NLI failed for id={record.get("id")}:', e)
+                    print(tb)
+                    sample_error = sample_error or 'post_correction_nli_fallback_failed'
+                    sample_last_error = tb
+                    nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
             supported_corrected = (nli_label_corrected.upper() in ('ENTAILMENT', 'ENTAILS')) and nli_score_corrected >= 0.6
         end_corr = time.time()
 
@@ -131,13 +185,23 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
             'supported_corrected': supported_corrected,
             'correction_effect': (True if (supported_corrected and not supported) else (False if (supported_corrected == supported) else None)),
             'timing': timing,
+            'error': sample_error,
+            'last_error': sample_last_error,
         })
 
     out = {
         'id': record.get('id'),
+        'prediction': fused,
         'fused_summary': fused,
         'reference': ref,
+        'corrected': ' '.join([item.get('corrected', item.get('sentence', '')) for item in sent_results]),
+        'support_rate': (sum(1 for item in sent_results if item.get('supported')) / max(1, len(sent_results))),
+        'rouge': {},
+        'rouge_corrected': {},
+        'details': sent_results,
         'sentences': sent_results,
+        'error': sample_error or summ_result.get('error'),
+        'last_error': sample_last_error or getattr(corr, 'last_error', None) or getattr(nli, 'last_error', None) or summ_result.get('error'),
         'pipeline_timings': {
             'total_sentences': len(sent_results),
             'summarization_chunks': len(summ_result.get('chunks', [])),

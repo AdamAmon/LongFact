@@ -23,6 +23,8 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
 
     for rec in records:
         # skip samples that were flagged as missing document (unless fallback enabled)
+        sample_error = None
+        sample_last_error = None
         if rec.get('skipped') and not FALLBACK_TO_SUMMARY:
             results.append({
                 'id': rec['id'],
@@ -38,48 +40,106 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
             })
             continue
 
-        doc = rec['document']
-        ref = rec.get('summary', '') or ''
-        out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device, load_in_8bit=load_in_8bit)
-        pred = out.get('fused', '')
+        try:
+            doc = rec['document']
+            ref = rec.get('summary', '') or ''
+            out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device, load_in_8bit=load_in_8bit)
+            pred = out.get('fused', '')
+            summ_error = out.get('error')
 
-        # build retriever on document passages; simple chunking for evidence
-        passages = out['chunks']
-        retr = Retriever()
-        retr.build_index(passages)
+            # build retriever on document passages; simple chunking for evidence
+            passages = out.get('chunks', []) or []
+            retr = Retriever()
+            try:
+                retr.build_index(passages)
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('run_experiment: retriever.build_index failed for sample', rec.get('id'), e)
+                print(tb)
 
-        # instantiate NLI checker once per sample; respect CLI device and 8-bit flag
-        support_rate, details = compute_support_rate(pred, doc, retr, nli, top_k=3)
-        # perform corrections for sentences not supported
-        corrected_sents = []
-        for d in details:
-            if not d['supported']:
-                corrected = corr.correct(d['evidences'], d['sentence'])
-                corrected_sents.append(corrected)
-            else:
-                corrected_sents.append(d['sentence'])
-        corrected_pred = ' '.join(corrected_sents)
+            # instantiate NLI checker once per sample; respect CLI device and 8-bit flag
+            support_rate, details = compute_support_rate(pred, doc, retr, nli, top_k=3)
+            # perform corrections for sentences not supported
+            corrected_sents = []
+            for d in details:
+                if not d.get('supported'):
+                    try:
+                        corrected = corr.correct(d.get('evidences', []), d.get('sentence', ''))
+                    except Exception as e:
+                        import traceback
+                        tb = traceback.format_exc()
+                        print('run_experiment: corrector.correct failed for sample', rec.get('id'), e)
+                        print(tb)
+                        corrected = d.get('sentence', '')
+                        # attach error info to detail for auditing
+                        d['error'] = str(e)
+                        d['last_error'] = tb
+                    corrected_sents.append(corrected)
+                else:
+                    corrected_sents.append(d.get('sentence', ''))
+            corrected_pred = ' '.join(corrected_sents)
 
-        rouge_scores = compute_rouge(ref, pred) if ref else {}
-        rouge_corrected = compute_rouge(ref, corrected_pred) if ref else {}
+            try:
+                rouge_scores = compute_rouge(ref, pred) if ref else {}
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('run_experiment: compute_rouge failed for prediction', rec.get('id'), e)
+                print(tb)
+                rouge_scores = {}
 
-        results.append({
-            'id': rec['id'],
-            'reference': ref,
-            'prediction': pred,
-            'corrected': corrected_pred,
-            'support_rate': support_rate,
-            'rouge': rouge_scores,
-            'rouge_corrected': rouge_corrected,
-            'details': details,
-            # include summarization debug snapshot to help diagnose empty outputs
-            'summarization_debug': {
-                'chunks': out.get('chunks'),
-                'local_summaries': out.get('local_summaries'),
-                'fused': out.get('fused'),
-                'error': out.get('error'),
-            },
-        })
+            try:
+                rouge_corrected = compute_rouge(ref, corrected_pred) if ref else {}
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('run_experiment: compute_rouge failed for corrected prediction', rec.get('id'), e)
+                print(tb)
+                rouge_corrected = {}
+
+            results.append({
+                'id': rec['id'],
+                'reference': ref,
+                'prediction': pred,
+                'fused_summary': pred,
+                'corrected': corrected_pred,
+                'support_rate': support_rate,
+                'rouge': rouge_scores,
+                'rouge_corrected': rouge_corrected,
+                'details': details,
+                'sentences': details,
+                'error': sample_error or summ_error,
+                'last_error': sample_last_error or getattr(corr, 'last_error', None) or getattr(nli, 'last_error', None) or summ_error,
+                # include summarization debug snapshot to help diagnose empty outputs
+                'summarization_debug': {
+                    'chunks': out.get('chunks'),
+                    'local_summaries': out.get('local_summaries'),
+                    'fused': out.get('fused'),
+                    'error': out.get('error'),
+                },
+            })
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print('run_experiment: processing sample failed for id', rec.get('id'), e)
+            print(tb)
+            # append a result with error info so analysis sees the failure per-sample
+            results.append({
+                'id': rec.get('id'),
+                'reference': rec.get('summary', ''),
+                'prediction': '',
+                'fused_summary': '',
+                'corrected': '',
+                'support_rate': 0.0,
+                'rouge': {},
+                'rouge_corrected': {},
+                'details': [],
+                'sentences': [],
+                'error': str(e),
+                'last_error': tb,
+                'summarization_debug': rec.get('document') if isinstance(rec.get('document'), dict) else {'chunks': None},
+            })
 
     return results
 

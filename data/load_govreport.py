@@ -8,8 +8,11 @@ from pathlib import Path
 
 try:
     from datasets import load_dataset, DownloadConfig
-except Exception:
+except Exception as e:
     load_dataset = None
+    import traceback
+    print('load_govreport: datasets import failed:', e)
+    traceback.print_exc()
 
 from config import DEFAULT_DATA_DIR, DEFAULT_GOVREPORT_DATASET, ensure_local_dirs, FALLBACK_TO_SUMMARY
 
@@ -21,8 +24,11 @@ def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir:
     download_cfg = None
     try:
         download_cfg = DownloadConfig(local_files_only=True)
-    except Exception:
+    except Exception as e:
         download_cfg = None
+        import traceback
+        print('load_govreport: DownloadConfig creation failed:', e)
+        traceback.print_exc()
 
     # Prefer using a DownloadConfig to enforce local-only downloads; fall back
     # to the local_files_only flag if DownloadConfig is unavailable.

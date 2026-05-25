@@ -18,8 +18,9 @@ def main():
                 info['torch_version'] = getattr(mod, '__version__', 'unknown')
                 try:
                     info['cuda_available'] = mod.cuda.is_available()
-                except Exception:
+                except Exception as e:
                     info['cuda_available'] = False
+                    info['cuda_check_error'] = str(e)
             else:
                 info[f'{m}_version'] = getattr(mod, '__version__', 'unknown')
         else:

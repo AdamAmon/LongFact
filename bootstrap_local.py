@@ -27,13 +27,19 @@ from config import (
 
 try:
     from datasets import load_dataset
-except Exception:
+except Exception as e:
     load_dataset = None
+    import traceback
+    print('bootstrap_local: datasets import failed:', e)
+    traceback.print_exc()
 
 try:
     from huggingface_hub import snapshot_download
-except Exception:
+except Exception as e:
     snapshot_download = None
+    import traceback
+    print('bootstrap_local: huggingface_hub import failed:', e)
+    traceback.print_exc()
 
 
 def write_env_file(env_path: Path, values: Dict[str, str]) -> None:

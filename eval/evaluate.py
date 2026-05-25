@@ -3,8 +3,11 @@ from typing import List, Dict, Tuple
 
 try:
     from rouge_score import rouge_scorer
-except Exception:
+except Exception as e:
     rouge_scorer = None
+    import traceback
+    print('evaluate: rouge_score import failed:', e)
+    traceback.print_exc()
 
 
 def compute_rouge(ref: str, pred: str) -> Dict[str, float]:
@@ -58,15 +61,35 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
             is_sup = False
             best_label = None
             best_score = 0.0
-            for e in evidences:
-                label, score = nli_checker.check(e, s)
+            for ev in evidences:
+                try:
+                    label, score = nli_checker.check(ev, s)
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print('evaluate: nli.check failed for evidence:', (ev[:200] if isinstance(ev, str) else str(ev)), e)
+                    print(tb)
+                    details.append({
+                        'sentence': s,
+                        'supported': False,
+                        'best_label': 'ERROR',
+                        'best_score': 0.0,
+                        'evidences': evidences[:3],
+                        'error': str(e),
+                        'last_error': tb,
+                    })
+                    best_label = 'ERROR'
+                    best_score = 0.0
+                    is_sup = False
+                    break
                 if score > best_score:
                     best_score = score
                     best_label = label
                 if label.upper() == 'ENTAILMENT' and score >= threshold:
                     is_sup = True
                     break
-        details.append({'sentence': s, 'supported': is_sup, 'best_label': best_label, 'best_score': best_score, 'evidences': evidences[:3]})
+        if not details or details[-1].get('sentence') != s:
+            details.append({'sentence': s, 'supported': is_sup, 'best_label': best_label, 'best_score': best_score, 'evidences': evidences[:3]})
         if is_sup:
             supported += 1
     rate = supported / max(1, len(sents))

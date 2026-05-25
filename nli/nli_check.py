@@ -10,9 +10,11 @@ import traceback
 
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
-except Exception:
+except Exception as e:
     AutoTokenizer = None
     AutoModelForSequenceClassification = None
+    print('nli_check: transformers import failed:', e)
+    traceback.print_exc()
 
 from config import DEFAULT_NLI_MODEL
 
@@ -28,7 +30,9 @@ class NLIChecker:
             try:
                 # device_map='auto' will place parameters on GPU where possible
                 self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
-            except Exception:
+            except Exception as e:
+                print(f'nli_check: 8bit load failed for {model_name}:', e)
+                traceback.print_exc()
                 # fallback to normal loading
                 self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
         else:
@@ -36,6 +40,7 @@ class NLIChecker:
 
         # label mapping provided by model config, e.g. {0: 'CONTRADICTION', 1: 'NEUTRAL', 2: 'ENTAILMENT'}
         self.id2label = {int(k): v for k, v in self.model.config.id2label.items()}
+        self.last_error: str = None
 
     def check(self, premise: str, hypothesis: str) -> Tuple[str, float]:
         """对 (premise, hypothesis) 返回预测标签与概率 (label, score)。"""
@@ -46,11 +51,16 @@ class NLIChecker:
                 probs = torch.softmax(logits, dim=-1).squeeze(0)
                 score, idx = torch.max(probs, dim=-1)
                 label = self.id2label.get(int(idx.item()), str(idx.item()))
+                # clear last_error on success
+                self.last_error = None
                 return label, float(score.item())
-        except Exception:
-            print("Exception in NLIChecker.check:")
-            print(traceback.format_exc())
-            raise
+        except Exception as e:
+            # Do not raise here; return a safe error token so pipeline continues.
+            err = traceback.format_exc()
+            print("Exception in NLIChecker.check:", e)
+            print(err)
+            self.last_error = err
+            return 'ERROR', 0.0
 
     def is_supported(self, premise: str, hypothesis: str, threshold: float = 0.6) -> bool:
         """基于阈值判断 hypothesis 是否被 premise 支持（ENTAILMENT 且概率 >= threshold）。"""
@@ -64,13 +74,22 @@ class NLIChecker:
         """
         if len(premises) != len(hypotheses):
             raise ValueError("premises and hypotheses must have the same length")
-        inputs = self.tokenizer(premises, hypotheses, return_tensors='pt', truncation=True, padding=True, max_length=1024).to(self.device)
-        with torch.no_grad():
-            logits = self.model(**inputs).logits
-            probs = torch.softmax(logits, dim=-1)
-            max_scores, idxs = torch.max(probs, dim=-1)
-            labels = [self.id2label.get(int(i.item()), str(i.item())) for i in idxs]
-            return list(zip(labels, [float(s.item()) for s in max_scores]))
+        try:
+            inputs = self.tokenizer(premises, hypotheses, return_tensors='pt', truncation=True, padding=True, max_length=1024).to(self.device)
+            with torch.no_grad():
+                logits = self.model(**inputs).logits
+                probs = torch.softmax(logits, dim=-1)
+                max_scores, idxs = torch.max(probs, dim=-1)
+                labels = [self.id2label.get(int(i.item()), str(i.item())) for i in idxs]
+                self.last_error = None
+                return list(zip(labels, [float(s.item()) for s in max_scores]))
+        except Exception as e:
+            err = traceback.format_exc()
+            print('nli_check: batch inference failed:', e)
+            print(err)
+            self.last_error = err
+            # return error markers for each input so callers can continue
+            return [('ERROR', 0.0) for _ in premises]
 
     def check_with_evidence(self, evidences: list, hypothesis: str, strategy: str = 'max') -> tuple:
         """对同一 hypothesis 使用多条 evidence 分别做 NLI，并根据 strategy 聚合结果。
@@ -89,17 +108,23 @@ class NLIChecker:
         try:
             pairs = self.check_batch(evidences, [hypothesis] * len(evidences))
             per = [(lab, sc, e) for (lab, sc), e in zip(pairs, evidences)]
-        except Exception:
+        except Exception as e:
             # fallback to serial checks preserving error handling
+            print('nli_check: batch check failed, falling back to serial checks:', e)
+            traceback.print_exc()
             per = []
-            for e in evidences:
+            for ev in evidences:
                 try:
-                    lab, sc = self.check(e, hypothesis)
-                except Exception:
-                    print("Exception in check_with_evidence for evidence:", e[:200])
+                    lab, sc = self.check(ev, hypothesis)
+                except Exception as e2:
+                    print("Exception in check_with_evidence for evidence:", (ev[:200] if isinstance(ev, str) else str(ev)))
                     print(traceback.format_exc())
                     lab, sc = 'ERROR', 0.0
-                per.append((lab, sc, e))
+                per.append((lab, sc, ev))
+
+        if not per:
+            self.last_error = None
+            return 'NO_EVIDENCE', 0.0, []
 
         if strategy == 'max':
             best = max(per, key=lambda x: x[1])
