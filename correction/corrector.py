@@ -1,17 +1,22 @@
 """自动纠错模块：对被判不支持的摘要句进行基于证据的局部改写。
 
-实现：构造 prompt（包含证据段）并调用 HF text2text 或 text-generation pipeline 生成候选改写。
+实现：构造 prompt（包含证据段）并调用 HF text-generation pipeline 生成候选改写。
 提供回退策略以保证在无模型时仍能作为占位。"""
+import re
 from typing import List, Optional
 
 try:
-    from transformers import pipeline, GenerationConfig, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
+    from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 except Exception:
     pipeline = None
-    GenerationConfig = None
     AutoTokenizer = None
     AutoModelForSeq2SeqLM = None
     AutoModelForCausalLM = None
+
+try:
+    from transformers import BitsAndBytesConfig
+except Exception:
+    BitsAndBytesConfig = None
 
 from config import DEFAULT_CORRECTOR_MODEL
 
@@ -25,52 +30,42 @@ class Corrector:
         self.device = device
         self.max_length = max_length
         self.pipe = None
+        self.last_error: Optional[str] = None
         key = f"{model_name}::dev{device}::8bit{load_in_8bit}::len{max_length}"
         if key in _CORRECTOR_CACHE:
             cached = _CORRECTOR_CACHE[key]
             self.pipe = cached.get('pipe')
             return
         if model_name and pipeline is not None:
-            gen_cfg = None
-            if GenerationConfig is not None:
-                gen_cfg = GenerationConfig(max_new_tokens=self.max_length)
-
-            # Try to load an 8-bit model object when requested
-            if load_in_8bit and AutoTokenizer is not None:
+            # Try to load an 8-bit model object when requested.
+            # Support both seq2seq and causal LMs so the same corrector can be
+            # used with different default models.
+            if load_in_8bit and AutoTokenizer is not None and BitsAndBytesConfig is not None:
                 try:
                     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-                    # prefer seq2seq model for text2text; fall back to causal if unavailable
+                    quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
                     if AutoModelForSeq2SeqLM is not None:
                         try:
-                            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
-                        except Exception:
-                            model = None
-                    else:
-                        model = None
-                    if model is None and AutoModelForCausalLM is not None:
-                        model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
-
-                    if model is not None:
-                        if gen_cfg is not None:
-                            self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer, generation_config=gen_cfg)
-                        else:
+                            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
                             self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer)
+                        except Exception:
+                            self.pipe = None
+                    if self.pipe is None and AutoModelForCausalLM is not None:
+                        model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                        self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer)
+                    if self.pipe is not None:
+                        _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
+                        return
                 except Exception:
                     # fall through to normal pipeline loader
                     self.pipe = None
 
             if self.pipe is None:
                 try:
-                    if gen_cfg is not None:
-                        self.pipe = pipeline('text2text-generation', model=model_name, device=device, generation_config=gen_cfg)
-                    else:
-                        self.pipe = pipeline('text2text-generation', model=model_name, device=device)
+                    self.pipe = pipeline('text2text-generation', model=model_name, device=device)
                 except Exception:
                     try:
-                        if gen_cfg is not None:
-                            self.pipe = pipeline('text-generation', model=model_name, device=device, generation_config=gen_cfg)
-                        else:
-                            self.pipe = pipeline('text-generation', model=model_name, device=device)
+                        self.pipe = pipeline('text-generation', model=model_name, device=device)
                     except Exception:
                         self.pipe = None
         # cache the loaded pipeline (or None) to avoid re-loading across samples
@@ -87,19 +82,51 @@ class Corrector:
         )
         return prompt
 
+    def _normalize_generation(self, prompt: str, generated: str) -> str:
+        text = generated.strip()
+        if text.startswith(prompt):
+            text = text[len(prompt):].strip()
+
+        for marker in (
+            'Corrected sentence:',
+            'Corrected Sentence:',
+            'Revised sentence:',
+            'Revised Sentence:',
+            'Correction:',
+            'Answer:',
+        ):
+            if marker in text:
+                text = text.split(marker, 1)[1].strip()
+                break
+
+        text = text.split('\n', 1)[0].strip()
+        first_sentence = re.split(r'(?<=[。！？.!?])\s+', text, maxsplit=1)[0].strip()
+        return first_sentence or text
+
     def correct(self, evidence: List[str], sentence: str) -> str:
         prompt = self.construct_prompt(evidence, sentence)
         if self.pipe is None:
             # fallback: try to do minimal correction by returning original sentence
+            self.last_error = 'corrector pipeline unavailable'
             return sentence
         try:
-            # generation parameters are supplied via GenerationConfig at pipeline init-time
-            out = self.pipe(prompt)
+            out = self.pipe(
+                prompt,
+                truncation=True,
+                max_new_tokens=self.max_length,
+                return_full_text=False,
+            )
             if isinstance(out, list) and len(out) > 0:
-                # text2text returns 'generated_text' key in many cases
-                return out[0].get('generated_text', out[0].get('summary_text', out[0].get('text', '')))
-        except Exception:
+                generated = out[0].get('generated_text', out[0].get('summary_text', out[0].get('text', '')))
+                if isinstance(generated, str):
+                    generated = self._normalize_generation(prompt, generated)
+                self.last_error = None
+                return generated or sentence
+            self.last_error = 'corrector returned empty output'
+        except Exception as exc:
+            self.last_error = f'{type(exc).__name__}: {exc}'
             return sentence
+        self.last_error = 'corrector returned empty output'
         return sentence
 
 

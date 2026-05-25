@@ -1,39 +1,43 @@
-# LongFact — 长文摘要事实一致性评测与纠错（当前实现）
+# LongFact — 长文摘要事实一致性评测与纠错
 
-此仓库实现了一个可复现的实验流水线：数据采样 → 分块摘要 → 证据检索 → 句子级 NLI 判定 → 局部纠错 → 评估（ROUGE + 支持率）。README 已更新以反映当前实现、默认配置与离线优先流程。
+LongFact 是一个面向 GovReport 长文摘要的本地可复现实验流水线，目标是把“长文摘要是否事实一致”拆成可验证的阶段：数据采样、分块摘要、证据检索、句子级 NLI 判定、局部纠错、ROUGE 与支持率评估。
 
-## 当前项目状态（2026-05）
-- 已完成 LongFact 简化流水线（摘要→检索→句子级 NLI→纠错→评估）并可在本地运行小规模样本（如 n=10）。
-- 已修复 NLI 聚合调用链关键问题：`check_with_evidence` 已作为 `NLIChecker` 类方法稳定运行，输出不再全量落入 `ERROR`。
-- 已提供结果汇总脚本：可从 jsonl 生成初步结果表（ROUGE 与句级 NLI统计）。
-- 已修复 GitHub Actions 中 smoke 阶段的不兼容调用，改为轻量、离线友好的快速检查。
+## 当前状态
 
-## CI 流水线说明
-- 工作流文件：`.github/workflows/ci.yml`
-- 当前 CI 主要步骤：依赖安装 → 编译检查 → 轻量 smoke 检查 → pytest。
-- 为提升跨平台稳定性，Windows 与 Linux 的 smoke 步骤已拆分执行（分别调用 `.ps1` / `.sh`）。
-- `bitsandbytes` 在 Windows 下改为可选（通过环境标记跳过安装），避免平台安装失败导致 CI 中断。
+- 核心流水线已可在本机运行：`run_experiment.py` 会串起采样 → 摘要 → 检索 → NLI → 纠错 → 评估。
+- 已验证 8-bit 路径可用：摘要、NLI、纠错都支持 `--load_in_8bit`，当前机器上已成功完成 500 样本运行。
+- 已修复批量 NLI 聚合：`NLIChecker.check_with_evidence()` 可用，并且 `eval/evaluate.py` 会优先使用它减少 forward 次数。
+- 已增加模块级缓存：`summarize/model_summarizer.py` 与 `correction/corrector.py` 避免在同一轮实验中反复加载大模型。
+- 已验证测试通过：`pytest -q tests/test_unit.py` 通过。
 
-## 要点概览
-- 入口脚本：`run_experiment.py`（端到端 runner，采样→生成→检索→NLI→纠错→评估）
-- 分块与摘要：`summarize/run_summarize.py`、`summarize/model_summarizer.py`
-- 检索：`retrieval/retriever.py`（embedding + FAISS，支持 BM25 混合）
-- 句子级 NLI：`nli/nli_check.py`（包含 `check_batch` 批量接口）
-- 局部纠错：`correction/corrector.py`
-- 评估：`eval/evaluate.py`（ROUGE、support_rate 计算）
+## 仓库结构
 
-## 环境与依赖
-- 推荐 Python 3.8+（本仓库当前在本机使用 Python 3.11 测试通过）。
+- `data/load_govreport.py`：加载 GovReport 数据集与本地缓存。
+- `summarize/run_summarize.py`：分块摘要入口，输出 chunk、局部摘要与融合摘要。
+- `summarize/model_summarizer.py`：摘要模型封装，支持回退实现与 8-bit 加载。
+- `retrieval/retriever.py`：嵌入检索与 FAISS 索引，支持 BM25 混合查询。
+- `nli/nli_check.py`：句子级 NLI 判定与批量接口。
+- `correction/corrector.py`：基于证据的局部纠错。
+- `eval/evaluate.py`：ROUGE 与支持率计算。
+- `run_experiment.py`：端到端实验主入口。
+- `scripts/analyze_results.py`：对 jsonl 实验结果做汇总统计。
+
+## 环境要求
+
+- 推荐 Python 3.8+；当前本机使用 Python 3.11 的虚拟环境已验证通过。
 - 安装依赖：
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-（若使用 GPU，请根据需要安装相应的 `torch` 版本与 `accelerate`。）
+- 若使用 GPU，请确保已安装匹配版本的 `torch`、`accelerate`，并按需启用 `bitsandbytes`。
 
-## 本地配置与离线优先
-`config.py` 会在项目启动时读取根目录的 `.env.local`（若存在）。推荐在项目根创建或使用 `bootstrap_local.py --write-env` 生成 `.env.local`。常用变量示例：
+## 本地配置
+
+`config.py` 会读取项目根目录的 `.env.local`。建议使用 `bootstrap_local.py --write-env` 生成本地配置，并确保缓存目录存在。
+
+推荐变量示例：
 
 ```text
 LONGFACT_DATA_DIR=./data/cache
@@ -50,148 +54,106 @@ HF_DATASETS_OFFLINE=1
 HF_HUB_OFFLINE=1
 ```
 
-本仓库已在 `.env.local` 中记录推荐离线设置，运行时 `config.ensure_local_dirs()` 会创建所需目录。
-
-如果你需要完全禁止网络访问（强制仅用本地缓存），在运行前也可以在 PowerShell 中临时设置：
+离线运行时可在 PowerShell 中临时设置：
 
 ```powershell
 $env:HF_DATASETS_OFFLINE='1'
 $env:HF_HUB_OFFLINE='1'
 $env:HF_DATASETS_CACHE='./data/cache'
 $env:TRANSFORMERS_CACHE='./.hf-cache'
-.\.venv\Scripts\python.exe run_experiment.py --n 1 --use_model --device -1
 ```
 
-## 运行示例（常用场景）
+## 真实运行命令
 
-- 生成单文档摘要（回退实现可离线运行）：
+先激活虚拟环境：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+单文档摘要调试：
 
 ```powershell
 python summarize/run_summarize.py --input "这是一个用于测试的长文..." --out sample_result.json
 ```
 
-- 调试 `run_pipeline`（在单样本上打印中间输出，建议用于定位 `fused`/`prediction` 为空的问题）：
+单样本流水线调试：
 
 ```powershell
 python -c "from summarize.run_summarize import run_pipeline; import json; doc='长文内容'; print(json.dumps(run_pipeline(doc, use_model=True, model_name=None, device=-1), ensure_ascii=False, indent=2))"
 ```
 
-- 端到端小规模实验（采样→生成→检索→NLI→纠错→评估）：
+端到端小规模实验：
 
 ```powershell
 python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device -1 --dataset_cache_dir data/cache --out results/experiment_n10.jsonl
 ```
 
-提示：若要加速排查问题，先用 `--n 1 --device -1` 在单条样例上本地调试。
-
-## 输出格式与分析脚本
-- `summarize/run_summarize.py --out <path>` 会写入单条 JSON，字段包含 `chunks`, `local_summaries`, `fused` 等。
-- `run_experiment.py` 输出为 jsonl（每行一个样本），字段示例： `prediction`（融合摘要）、`corrected`（纠错后文本）、`support_rate`（句子级支持率）、`rouge`（ROUGE 分数字典）。
-- 已提供 `scripts/analyze_results.py`，用于汇总 jsonl 并生成 `results/summary_*.json`。
-
-## 测试与质量保证
-- 仓库包含单元测试（`tests/`），在本地虚拟环境中可用 `pytest -q` 运行。项目在离线缓存模式下也通过了基础测试（6 passed，具体请运行你的环境中的 `pytest`）。
-
-## 开发提示
-- `retrieval/retriever.py` 提供 FAISS 索引构建与 BM25 混合查询接口，建议当数据量增大时将索引持久化到磁盘以加速后续运行。
-- `nli/nli_check.py` 提供 `check_batch` 批量 NLI 判定以提高吞吐量。
-- 若 `prediction` 或 `corrected` 字段为空，请先在单样本上运行 `run_pipeline` 并检查 `fused` 是否被模型正确生成（见上方调试命令）。
-
-## 常见问题与排错
-- 若出现模型加载从网络拉取的情况，请检查 `.env.local` 或运行时环境变量，确保 `HF_HUB_OFFLINE` / `HF_DATASETS_OFFLINE` 已启用并且指向本地缓存路径。
-- 模型缓存目录示例： `./.hf-cache/models--facebook--bart-large-mnli/snapshots/<id>/`（需包含 `pytorch_model.bin` 或 `model.safetensors` 与 `tokenizer.json`）。
-- 当在 CPU 上运行大型模型速度很慢时，考虑使用更小的回退模型或仅在少量样本上运行完整流水线以验证逻辑。
-
-## 需要帮助？
-如果你希望我：
-- 在本地对 `run_pipeline` 做一次 n=1 的调试并汇报中间输出，请回复 “调试 run_pipeline”。
-- 或者我可以帮你把 `prediction` 为空的问题定位并修复为优先任务。
-
-感谢使用 LongFact；如需我继续运行实验或修改代码文档，请告诉我下一步。
-
-## 补充说明（方便从 README 完全理解并复现实验）
-
-以下说明旨在帮助你仅凭 README 即可复现实验、理解输出与常用运维步骤。
-
-- **复现实验（Task 3.1 — n=10）步骤**：
-	1. 确保模型与数据已缓存到本地（参见上文 HF 缓存变量）。
-	2. 激活虚拟环境并安装依赖：
+8-bit 端到端实验（当前已验证可跑）：
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python run_experiment.py --n 500 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --load_in_8bit --dataset_cache_dir data/cache --out results/experiment_n500_qwen.jsonl
 ```
 
-	3. 运行端到端实验（样例）：
+结果汇总：
 
 ```powershell
-python run_experiment.py --n 10 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device -1 --dataset_cache_dir data/cache --out results/experiment_n10.jsonl
+python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out results/summary_n500_qwen.json
 ```
 
-	4. 生成汇总（ROUGE 与句级 NLI 统计）：
+## 已验证结果
 
-```powershell
-python scripts/analyze_results.py --input results/experiment_n10.jsonl --out results/summary_n10.json
-```
+- `results/experiment_n500_qwen.jsonl`：500 条样本全部写出。
+- `results/summary_n500_qwen.json`：已生成。
+- 统计摘要：
+  - 平均 `support_rate` 约为 `0.6721`
+  - 平均 `rouge1_fmeasure` 约为 `0.4811`
+  - 500 条记录均包含 `prediction`、`corrected`、`support_rate`、`rouge`、`rouge_corrected`、`details`
 
-- **重要输出（建议保留的“最终报告”文件）**：
-	- `pipeline_n10_qwen.jsonl` — pipeline 原始逐样本输出（若存在）
-	- `experiment_n10.jsonl` — run_experiment 输出（主 jsonl）
-	- `summary_n10.json` — analyze_results 生成的汇总（ROUGE/NLI 支持率）
-	- `per_sample_results.csv` — 每个样本的表格视图（方便导入 Excel）
-	- `summary_results.json` / `summary_results_examples.jsonl` — 进一步的示例与汇总
-	- `test_pipeline.jsonl` — 调试用的小样本输出
+## 输出字段说明
 
-- **JSONL 每行字段（典型）**：
-	- `id`：样本唯一标识
-	- `reference`：参考摘要（gold）
-	- `prediction` 或 `fused`：融合摘要（模型生成）
-	- `sentences`：原文拆分句列表，每句包含 `text`, `nli_label`, `nli_per_evidence`（逐证据分数）
-	- `corrected`：纠错后的最终文本（若已运行纠错模块）
-	- `rouge`：ROUGE 各项分数字典
-	- `support_rate`：句级支持率（基于 NLI 判定的比例）
+- `prediction`：摘要融合后的原始预测文本。
+- `corrected`：纠错后的文本。
+- `support_rate`：句子级支持率。
+- `rouge` / `rouge_corrected`：纠错前后 ROUGE 分数。
+- `details`：逐句 NLI 结果与证据。
+- `summarization_debug`：分块、局部摘要、融合摘要与错误信息的调试快照。
 
-- **如何产生 ROUGE 与句级 NLI 统计**：
-	1. `run_experiment.py` 在每条记录中计算并写入 `rouge` 与 `sentences`。  
-	2. `scripts/analyze_results.py` 汇总 jsonl 中的 `rouge`、`support_rate`，并写出 `summary_*.json` 与 `per_sample_results.csv`。
+## 已知限制
 
-- **测试与 CI（本地复现）**：
-	- 运行单元测试：
+- 纠错结果的质量仍依赖所选模型和证据提示词；如果你切换到别的本地模型，仍建议先做单样本检查，确认 `corrected` 真的发生了变化。
+- 某些摘要句在 NLI 上会被标记为非支持，但具体改写效果取决于模型输出，因此结果文件中仍可能保留与原句相近的文本。
+
+## 测试与排错
+
+运行单元测试：
 
 ```powershell
 pytest -q
 ```
 
-	- 在本地模拟 CI smoke（Windows PowerShell）：
+Windows smoke 检查：
 
 ```powershell
-.\ .github\ci\model_qa_smoke.ps1
+.\.github\ci\model_qa_smoke.ps1
 ```
 
-	- 若在 Linux/macOS ：
+Linux smoke 检查：
 
 ```bash
 bash .github/ci/model_qa_smoke.sh
 ```
 
-	- 若 CI 报错请优先检查：`.env.local` 的离线缓存变量、`requirements.txt`（bitsandbytes 可选）、以及本地 Python 可执行路径（PowerShell 下优先使用 `.venv\Scripts\Activate.ps1`）。
+常见排错方向：
 
-- **结果清理与归档**：
-	- 仓库包含简单的归档流程：将非最终报告文件移动到 `results/archive/<timestamp>/` 以便保留最小报告集合。示例（PowerShell）：
+- 如果 `prediction` 为空，先单样本运行 `run_pipeline`，检查 `fused` 是否为空。
+- 如果 NLI 全部异常，优先检查模型缓存、离线环境变量和 `nli/nli_check.py`。
+- 如果检索不返回证据，检查 `data/cache` 下的 GovReport 缓存和 `retrieval/retriever.py` 索引构建逻辑。
 
-```powershell
-$keep=@("pipeline_n10_qwen.jsonl","experiment_n10.jsonl","summary_n10.json","per_sample_results.csv","summary_results.json","summary_results_examples.jsonl","test_pipeline.jsonl");
-$arch="results/archive/<timestamp>/phase2"; New-Item -ItemType Directory -Force -Path $arch | Out-Null; Get-ChildItem -File results | Where-Object { $keep -notcontains $_.Name } | Move-Item -Destination $arch -Force
-```
+## 提示
 
-	- 每次归档会在 `results/archive/.../CLEANUP_NOTES.md` 追加移动记录。
+- `run_experiment.py` 使用的是真实参数：`--n`、`--use_model`、`--model_name`、`--device`、`--load_in_8bit`、`--dataset_cache_dir`、`--out`。
+- `scripts/analyze_results.py` 使用 `--in` 和 `--out`，不是 `--input`。
+- Windows 下 `bitsandbytes` 为可选依赖，避免平台安装失败。
 
-- **常见故障排查补充**：
-	- NLI 全为 `ERROR`：检查 `nli/nli_check.py` 是否抛出异常；在离线模式下确认模型文件完整且 `HF_HUB_OFFLINE=1`。  
-	- `prediction` 为空：在单样本模式下运行 `run_pipeline` 并检查 `fused` 字段；确认 summarizer 模型是否可用或回退到更小模型。  
-	- 检索不返回证据：确认 `data/cache` 下是否有已索引的 embedding，或重新运行索引构建：`from retrieval.retriever import Retriever; r=Retriever(...); r.build_index()`。
-
-- **提交与发布建议**：
-	- 我建议在确认所有本地测试通过后，把代码更改分支提交并发起 PR，变更包含：`nli` 修复、CI smoke 调整、README 更新、归档脚本。  
-
-如需，我可以直接把 README 中这些补充保存（我已添加），并可以同时生成一个更详尽的 `docs/` 页面或 `USAGE.md`，把命令、示例输出和 JSON 模式展开为可搜索的文档。告诉我是否需要我把 README 的这些更详细内容拆成单独文档并创建初始 files。 
+如果你接下来要继续优化纠错效果，建议先检查 `correction/corrector.py` 的模型输出是否足够简洁，再决定是否需要换更适合的纠错模型或调整 prompt。

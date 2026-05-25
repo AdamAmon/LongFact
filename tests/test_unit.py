@@ -77,3 +77,33 @@ def test_corrector_fallback():
     evidence = ["E1"]
     s = "Original sentence."
     assert corr.correct(evidence, s) == s
+
+
+def test_corrector_parses_generated_text():
+    corr = object.__new__(Corrector)
+    corr.pipe = lambda prompt, **kwargs: [{"generated_text": f"{prompt} Revised sentence."}]
+    corr.last_error = None
+    corr.max_length = 32
+    evidence = ["E1"]
+    s = "Original sentence."
+
+    out = corr.correct(evidence, s)
+
+    assert out == "Revised sentence."
+
+
+def test_corrector_records_generation_failure():
+    corr = object.__new__(Corrector)
+
+    def broken_pipe(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    corr.pipe = broken_pipe
+    corr.last_error = None
+    corr.max_length = 32
+
+    out = corr.correct(["E1"], "Original sentence.")
+
+    assert out == "Original sentence."
+    assert corr.last_error is not None
+    assert "RuntimeError" in corr.last_error
