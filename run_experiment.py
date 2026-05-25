@@ -13,9 +13,13 @@ from correction.corrector import Corrector
 from eval.evaluate import compute_rouge, compute_support_rate
 
 
-def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str = None, device: int = -1, dataset_cache_dir: str = None):
+def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str = None, device: int = -1, dataset_cache_dir: str = None, load_in_8bit: bool = False):
     records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR))
     results = []
+
+    # instantiate shared components once to avoid repeated loads
+    nli = NLIChecker(model_name=DEFAULT_NLI_MODEL, device=device, load_in_8bit=load_in_8bit)
+    corr = Corrector(model_name=model_name if use_model else DEFAULT_CORRECTOR_MODEL, device=device, load_in_8bit=load_in_8bit)
 
     for rec in records:
         # skip samples that were flagged as missing document (unless fallback enabled)
@@ -36,7 +40,7 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
 
         doc = rec['document']
         ref = rec.get('summary', '') or ''
-        out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device)
+        out = run_pipeline(doc, use_model=use_model, model_name=model_name, device=device, load_in_8bit=load_in_8bit)
         pred = out.get('fused', '')
 
         # build retriever on document passages; simple chunking for evidence
@@ -44,10 +48,8 @@ def run_sample(sample_count: int = 10, use_model: bool = False, model_name: str 
         retr = Retriever()
         retr.build_index(passages)
 
-        nli = NLIChecker(model_name=DEFAULT_NLI_MODEL, device=-1)
+        # instantiate NLI checker once per sample; respect CLI device and 8-bit flag
         support_rate, details = compute_support_rate(pred, doc, retr, nli, top_k=3)
-
-        corr = Corrector(model_name=model_name if use_model else DEFAULT_CORRECTOR_MODEL, device=device)
         # perform corrections for sentences not supported
         corrected_sents = []
         for d in details:
@@ -88,11 +90,12 @@ def main():
     parser.add_argument('--use_model', action='store_true')
     parser.add_argument('--model_name', type=str, default=DEFAULT_SUMMARIZER_MODEL)
     parser.add_argument('--device', type=int, default=-1)
+    parser.add_argument('--load_in_8bit', action='store_true', help='尝试使用 bitsandbytes 的 8-bit 加载（若可用）')
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
     parser.add_argument('--out', type=str, default='experiment_results.jsonl')
     args = parser.parse_args()
 
-    res = run_sample(sample_count=args.n, use_model=args.use_model, model_name=args.model_name, device=args.device, dataset_cache_dir=args.dataset_cache_dir)
+    res = run_sample(sample_count=args.n, use_model=args.use_model, model_name=args.model_name, device=args.device, dataset_cache_dir=args.dataset_cache_dir, load_in_8bit=args.load_in_8bit)
     with open(args.out, 'w', encoding='utf-8') as f:
         for r in res:
             f.write(json.dumps(r, ensure_ascii=False) + '\n')

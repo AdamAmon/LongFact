@@ -38,17 +38,34 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
         else:
             hits = retriever.query(s, top_k=top_k)
             evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
-        is_sup = False
-        best_label = None
-        best_score = 0.0
-        for e in evidences:
-            label, score = nli_checker.check(e, s)
-            if score > best_score:
-                best_score = score
-                best_label = label
-            if label.upper() == 'ENTAILMENT' and score >= threshold:
-                is_sup = True
-                break
+        # Use the NLI check_with_evidence aggregation to reduce forward passes
+        if not evidences:
+            details.append({'sentence': s, 'supported': False, 'best_label': None, 'best_score': 0.0, 'evidences': []})
+            continue
+
+        if hasattr(nli_checker, 'check_with_evidence'):
+            agg_label, agg_score, per = nli_checker.check_with_evidence(evidences, s, strategy='max')
+            # determine supported by checking if any per-evidence entailment meets threshold
+            is_sup = any((lab.upper() in ('ENTAILMENT', 'ENTAILS') and sc >= threshold) for lab, sc, _ in per)
+            # find best label/score
+            best_label = None
+            best_score = 0.0
+            if per:
+                best = max(per, key=lambda x: x[1])
+                best_label, best_score = best[0], best[1]
+        else:
+            # fallback to older interface where only `check` exists on nli_checker
+            is_sup = False
+            best_label = None
+            best_score = 0.0
+            for e in evidences:
+                label, score = nli_checker.check(e, s)
+                if score > best_score:
+                    best_score = score
+                    best_label = label
+                if label.upper() == 'ENTAILMENT' and score >= threshold:
+                    is_sup = True
+                    break
         details.append({'sentence': s, 'supported': is_sup, 'best_label': best_label, 'best_score': best_score, 'evidences': evidences[:3]})
         if is_sup:
             supported += 1

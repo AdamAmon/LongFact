@@ -5,38 +5,76 @@
 from typing import List, Optional
 
 try:
-    from transformers import pipeline, GenerationConfig
+    from transformers import pipeline, GenerationConfig, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 except Exception:
     pipeline = None
     GenerationConfig = None
+    AutoTokenizer = None
+    AutoModelForSeq2SeqLM = None
+    AutoModelForCausalLM = None
 
 from config import DEFAULT_CORRECTOR_MODEL
 
+# Module-level cache to avoid re-loading corrector models across samples
+_CORRECTOR_CACHE = {}
+
 
 class Corrector:
-    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128):
+    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128, load_in_8bit: bool = False):
         self.model_name = model_name
         self.device = device
         self.max_length = max_length
         self.pipe = None
+        key = f"{model_name}::dev{device}::8bit{load_in_8bit}::len{max_length}"
+        if key in _CORRECTOR_CACHE:
+            cached = _CORRECTOR_CACHE[key]
+            self.pipe = cached.get('pipe')
+            return
         if model_name and pipeline is not None:
-            # prefer text2text for instruction models
             gen_cfg = None
             if GenerationConfig is not None:
                 gen_cfg = GenerationConfig(max_new_tokens=self.max_length)
-            try:
-                if gen_cfg is not None:
-                    self.pipe = pipeline('text2text-generation', model=model_name, device=device, generation_config=gen_cfg)
-                else:
-                    self.pipe = pipeline('text2text-generation', model=model_name, device=device)
-            except Exception:
+
+            # Try to load an 8-bit model object when requested
+            if load_in_8bit and AutoTokenizer is not None:
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                    # prefer seq2seq model for text2text; fall back to causal if unavailable
+                    if AutoModelForSeq2SeqLM is not None:
+                        try:
+                            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
+                        except Exception:
+                            model = None
+                    else:
+                        model = None
+                    if model is None and AutoModelForCausalLM is not None:
+                        model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
+
+                    if model is not None:
+                        if gen_cfg is not None:
+                            self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer, generation_config=gen_cfg)
+                        else:
+                            self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer)
+                except Exception:
+                    # fall through to normal pipeline loader
+                    self.pipe = None
+
+            if self.pipe is None:
                 try:
                     if gen_cfg is not None:
-                        self.pipe = pipeline('text-generation', model=model_name, device=device, generation_config=gen_cfg)
+                        self.pipe = pipeline('text2text-generation', model=model_name, device=device, generation_config=gen_cfg)
                     else:
-                        self.pipe = pipeline('text-generation', model=model_name, device=device)
+                        self.pipe = pipeline('text2text-generation', model=model_name, device=device)
                 except Exception:
-                    self.pipe = None
+                    try:
+                        if gen_cfg is not None:
+                            self.pipe = pipeline('text-generation', model=model_name, device=device, generation_config=gen_cfg)
+                        else:
+                            self.pipe = pipeline('text-generation', model=model_name, device=device)
+                    except Exception:
+                        self.pipe = None
+        # cache the loaded pipeline (or None) to avoid re-loading across samples
+        _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
 
     def construct_prompt(self, evidence: List[str], sentence: str) -> str:
         evid = '\n'.join([f'- {e}' for e in evidence[:5]])

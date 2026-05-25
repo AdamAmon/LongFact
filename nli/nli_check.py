@@ -18,12 +18,22 @@ from config import DEFAULT_NLI_MODEL
 
 
 class NLIChecker:
-    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1):
+    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1, load_in_8bit: bool = False):
         if AutoTokenizer is None or AutoModelForSequenceClassification is None:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+        # Support 8-bit loading via bitsandbytes when requested
+        if load_in_8bit:
+            try:
+                # device_map='auto' will place parameters on GPU where possible
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', load_in_8bit=True)
+            except Exception:
+                # fallback to normal loading
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+        else:
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+
         # label mapping provided by model config, e.g. {0: 'CONTRADICTION', 1: 'NEUTRAL', 2: 'ENTAILMENT'}
         self.id2label = {int(k): v for k, v in self.model.config.id2label.items()}
 
@@ -75,15 +85,21 @@ class NLIChecker:
         if not evidences:
             return 'NO_EVIDENCE', 0.0, []
 
-        per = []
-        for e in evidences:
-            try:
-                lab, sc = self.check(e, hypothesis)
-            except Exception:
-                print("Exception in check_with_evidence for evidence:", e[:200])
-                print(traceback.format_exc())
-                lab, sc = 'ERROR', 0.0
-            per.append((lab, sc, e))
+        # Use batch checking to improve throughput when possible
+        try:
+            pairs = self.check_batch(evidences, [hypothesis] * len(evidences))
+            per = [(lab, sc, e) for (lab, sc), e in zip(pairs, evidences)]
+        except Exception:
+            # fallback to serial checks preserving error handling
+            per = []
+            for e in evidences:
+                try:
+                    lab, sc = self.check(e, hypothesis)
+                except Exception:
+                    print("Exception in check_with_evidence for evidence:", e[:200])
+                    print(traceback.format_exc())
+                    lab, sc = 'ERROR', 0.0
+                per.append((lab, sc, e))
 
         if strategy == 'max':
             best = max(per, key=lambda x: x[1])
