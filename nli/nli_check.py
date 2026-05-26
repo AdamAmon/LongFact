@@ -18,14 +18,16 @@ except Exception as e:
     print('nli_check: transformers import failed:', e)
     traceback.print_exc()
 
-from config import DEFAULT_NLI_MODEL
+from config import DEFAULT_NLI_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
 
 
 class NLIChecker:
-    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1, load_in_8bit: bool = False):
+    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
         if AutoTokenizer is None or AutoModelForSequenceClassification is None:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
+        self.precision = precision or PREFERRED_PRECISION or 'auto'
+        self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         # Support 8-bit loading via bitsandbytes when requested
         if load_in_8bit and BitsAndBytesConfig is not None:
@@ -44,7 +46,24 @@ class NLIChecker:
                 # fallback to normal loading
                 self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
         else:
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+            # If fp16 requested and GPU device available, try loading with float16 dtype
+            try:
+                if (self.precision in ('fp16', 'half')) and device >= 0:
+                    try:
+                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', torch_dtype=torch.float16)
+                        if self.torch_compile and hasattr(torch, 'compile'):
+                            try:
+                                self.model = torch.compile(self.model)
+                            except Exception:
+                                pass
+                    except Exception:
+                        # fallback to normal
+                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+                else:
+                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+            except Exception:
+                # fallback
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
 
         # label mapping provided by model config, e.g. {0: 'CONTRADICTION', 1: 'NEUTRAL', 2: 'ENTAILMENT'}
         self.id2label = {int(k): v for k, v in self.model.config.id2label.items()}
@@ -115,6 +134,9 @@ class NLIChecker:
         # Use batch checking to improve throughput when possible
         try:
             pairs = self.check_batch(evidences, [hypothesis] * len(evidences))
+            # if batch returned error markers, force fallback to serial
+            if any((isinstance(p, tuple) and p[0] == 'ERROR') for p in pairs):
+                raise RuntimeError('batch returned ERROR markers')
             per = [(lab, sc, e) for (lab, sc), e in zip(pairs, evidences)]
         except Exception as e:
             # fallback to serial checks preserving error handling

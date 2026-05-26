@@ -54,3 +54,14 @@ def ensure_local_dirs() -> None:
     """Create the common local cache/output directories if they do not exist."""
     DEFAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# Precision / performance toggles (project-local only)
+# Options: 'auto', 'fp32', 'fp16', '8bit'
+PREFERRED_PRECISION = os.getenv("LONGFACT_PREFERRED_PRECISION", os.getenv("PREFERRED_PRECISION", "auto"))
+# When True, attempt to call `torch.compile` on model objects where supported
+DEFAULT_TORCH_COMPILE = os.getenv("LONGFACT_TORCH_COMPILE", "0").strip().lower() in {"1", "true", "yes", "y"}
+
+# Embedding cache directory (for Retriever). Relative to project by default.
+EMBEDDING_CACHE_DIR = Path(os.getenv("LONGFACT_EMB_CACHE_DIR", PROJECT_ROOT / "data" / "emb_cache"))
+EMBEDDING_CACHE_DIR.mkdir(parents=True, exist_ok=True)

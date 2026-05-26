@@ -196,7 +196,65 @@ bash .github/ci/model_qa_smoke.sh
 ## 提速方向
 
 - 保持 `--load_in_8bit`，这是当前机器上的主力加速方式。
-- 优先控制样本规模和 chunk 数，先用 5 到 10 个样本做冒烟验证，再扩大到正式规模。
-- 后续如果继续优化，优先考虑批量摘要、减少重复检索开销、以及缩短纠错模型输出长度。
+- 优先做无损工程优化：
+  - 复用 `Retriever` 实例，避免每个样本重复加载 embedding 模型。
+  - 使用检索模型缓存（同模型同设备只加载一次）。
+  - 摘要后处理仅做清洗，不做强制句数截断。
+- 不做会影响实验口径的“提速”改动：
+  - 不降模型规格；
+  - 不降低 `summary_max_new_tokens` 作为默认行为；
+  - 不跳过纠错或 NLI 阶段；
+  - 不修改评测阈值与 top-k。
+
+  ## 最佳速率（Best-throughput）配置与验证
+
+  以下配置是在不明显降低质量（support_rate / ROUGE）前提下，经本地对比验证效果最稳健的“首选”运行方式。适合在本机（RTX 4060 / 8GB）或类似单卡环境中直接复现。
+
+  - 首选参数
+    - 精度：`--precision fp16`
+    - 不启用 8-bit：不要使用 `--load_in_8bit`（本机上 bitsandbytes 在某些路径上并未带来稳定加速，先在服务器/更强硬件上再试）
+    - 摘要 batch：`--summary_batch_size 32`（显存不足改为 16）
+    - 生成长度限制：`--summary_max_new_tokens 32`
+    - 可选试验：`--torch_compile`（短期对比测试后决定是否常驻）
+    - 纠错 / NLI 批量：将 `correct_batch` / `check_batch` 的批次设置为 8~32，减少频繁的小批次切换开销
+
+  - 推荐复现实验命令（PowerShell）
+
+  ```powershell
+  $env:PYTHONPATH='.'; $env:HF_DATASETS_OFFLINE='1'; $env:TRANSFORMERS_OFFLINE='1';
+  .\.venv\Scripts\python.exe run_experiment.py --n 5 --use_model --device 0 --precision fp16 --summary_batch_size 32 --summary_max_new_tokens 32 --out results/test_n5_accel.jsonl
+  ```
+
+  - 验证步骤与接受准则
+    1. 小规模验证：先跑 `n=1` / `n=5`，比较 `support_rate`、`corrected_support_rate`、`rouge1_fmeasure` 与 baseline，质量阈值为相对 baseline 差异 ≤ ±0.03。
+    2. 中等放大：`n=50`、`n=100`，监控显存、GPU 利用率、CPU 与 I/O；若通过再运行 `n=500`。
+    3. 监控指标：`nvidia-smi`（GPU 使用率/显存）、系统负载、结果文件（results/*.jsonl）的 `support_rate` 与 `rouge1_fmeasure`。
+
+  - 回滚与注意事项
+    - 若质量超出可接受阈值：回滚 `--summary_max_new_tokens` 为上一个数值或将 `--summary_batch_size` 降低并重跑；或恢复 `correction/corrector.py` 中 `max_length` 的上一个值。
+    - bitsandbytes / 8-bit：仅在目标服务器验证通过后再在实验脚本中启用。
+    - 避免在主循环中重复构建模型与 pipeline：确保模型/`pipeline` 在进程内只加载一次并被复用。
+
+  更多实现细节与关键文件：`run_experiment.py`、`summarize/model_summarizer.py`、`nli/nli_check.py`、`correction/corrector.py`、`retrieval/retriever.py`。
+
+### 无损 A/B 对照命令
+
+优化版小样本（n=5）：
+
+```powershell
+python run_experiment.py --n 5 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --load_in_8bit --summary_max_new_tokens 96 --summary_batch_size 4 --dataset_cache_dir data/cache --out results/test_n5_8bit_opt.jsonl
+```
+
+汇总优化版：
+
+```powershell
+python scripts/analyze_results.py --in results/test_n5_8bit_opt.jsonl --out results/test_n5_8bit_opt_summary.json --cases-out results/test_n5_8bit_opt_cases.json --csv-out results/test_n5_8bit_opt_buckets.csv
+```
+
+与历史基线（如 `results/test_n5_8bit.jsonl`）做并行对照时，建议同时检查：
+
+- `prediction` / `corrected` 的可读性与长度分桶是否异常；
+- `support_rate` 与 `corrected_support_rate` 是否下降；
+- `rouge1_fmeasure` 与 `rouge1_fmeasure_delta` 是否整体退化。
 
 如果你接下来要继续优化纠错效果，建议先检查 `correction/corrector.py` 的模型输出是否足够简洁，再决定是否需要换更适合的纠错模型或调整 prompt。

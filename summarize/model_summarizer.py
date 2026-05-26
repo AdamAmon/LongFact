@@ -18,19 +18,22 @@ except Exception as e:
     print('model_summarizer: transformers import failed:', e)
     traceback.print_exc()
 
-from config import DEFAULT_SUMMARIZER_MODEL
+from config import DEFAULT_SUMMARIZER_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
+import torch as _torch
 
 # Module-level cache so we don't repeatedly reload large models during experiments
 _SUMMARIZER_CACHE: Dict[str, object] = {}
 
 
 class HFLocalSummarizer:
-    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1):
+    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False):
         if pipeline is None:
             raise ImportError('transformers is required for HFLocalSummarizer')
         self.max_length = max_length
         self.batch_size = max(1, int(batch_size))
         self.last_error = None
+        self.precision = precision or PREFERRED_PRECISION or 'auto'
+        self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
         # generation config kept for compatibility but not passed directly to pipeline
         gen_cfg = None
         if GenerationConfig is not None:
@@ -60,6 +63,26 @@ class HFLocalSummarizer:
                 # fall back to pipeline(path) try below
                 pass
 
+        # Next try: if fp16 precision requested and causal model class available, attempt to load in fp16
+        try:
+            if (self.precision in ('fp16', 'half')) and AutoModelForCausalLM is not None and AutoTokenizer is not None and device >= 0:
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                    # load model with float16 dtype where supported
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', torch_dtype=_torch.float16, trust_remote_code=True)
+                    if self.torch_compile and hasattr(_torch, 'compile'):
+                        try:
+                            model = _torch.compile(model)
+                        except Exception:
+                            pass
+                    self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer, truncation=True, trust_remote_code=True)
+                    return
+                except Exception:
+                    # fallthrough to standard pipeline
+                    pass
+        except Exception:
+            pass
+
         # Fallback: let pipeline load the model (may be CPU/GPU depending on device arg)
         # Do not pass generation_config to pipeline directly (some transformers versions raise errors)
         self.pipe = pipeline('text-generation', model=model_name, device=device, truncation=True, trust_remote_code=True)
@@ -71,19 +94,15 @@ class HFLocalSummarizer:
         )
         return f'{instruction}\n\nDocument chunk:\n{chunk}\n\nSummary:'
 
-    def _truncate_to_n_sentences(self, text: str, n: int = 3) -> str:
+    def _sanitize_output_text(self, text: str) -> str:
         if not text:
             return ''
         # Drop common instruction leak fragments.
         for marker in ('\nTask:', '\nSummary:', '\nYou are an AI assistant'):
             if marker in text:
                 text = text.split(marker, 1)[0].strip()
-
-        pieces = re.split(r'(?<=[。！？.!?])\s+', text.strip())
-        pieces = [p.strip() for p in pieces if p.strip()]
-        if not pieces:
-            return text.strip()
-        return ' '.join(pieces[:n]).strip()
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
 
     def _parse_output(self, out) -> str:
         try:
@@ -93,11 +112,11 @@ class HFLocalSummarizer:
                 first = out[0]
                 if isinstance(first, dict):
                     raw = (first.get('generated_text') or first.get('summary_text') or first.get('text') or '').strip()
-                    return self._truncate_to_n_sentences(raw, n=3)
+                    return self._sanitize_output_text(raw)
                 return str(first).strip()
             if isinstance(out, dict):
                 raw = (out.get('generated_text') or out.get('summary_text') or out.get('text') or '').strip()
-                return self._truncate_to_n_sentences(raw, n=3)
+                return self._sanitize_output_text(raw)
             return str(out).strip()
         except Exception as e:
             import traceback
@@ -170,8 +189,8 @@ class FallbackSummarizer:
         return out
 
 
-def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1):
-    key = f'{model_name}::dev{device}::len{max_length}::8bit{load_in_8bit}::bs{batch_size}'
+def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False):
+    key = f'{model_name}::dev{device}::len{max_length}::8bit{load_in_8bit}::bs{batch_size}::prec{precision}::compile{torch_compile}'
     if model_name is None:
         return FallbackSummarizer()
 

@@ -28,8 +28,9 @@ def sentence_split(text: str) -> List[str]:
 
     if not text or not text.strip():
         return []
-    # Support Chinese and English punctuation while keeping sentence boundaries.
-    parts = re.split(r'(?<=[。！？.!?])\s+', text.strip())
+    # Support Chinese and English punctuation with or without trailing spaces.
+    # This avoids merging sentences like "句子一。句子二。" when there is no whitespace.
+    parts = re.split(r'(?<=[。！？.!?])\s*', text.strip())
     out = []
     for p in parts:
         s = p.strip()
@@ -48,7 +49,10 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
     supported = 0
     for s in sents:
         # if retriever has no index (e.g., empty document), skip retrieval
-        if getattr(retriever, 'index', None) is None and getattr(retriever, 'bm25', None) is None:
+        # use hasattr guard so lightweight test doubles without `bm25` still work.
+        has_index = hasattr(retriever, 'index') and (getattr(retriever, 'index') is not None)
+        has_bm25 = hasattr(retriever, 'bm25') and (getattr(retriever, 'bm25') is not None)
+        if (not has_index) and (not has_bm25):
             hits = []
             evidences = []
         else:

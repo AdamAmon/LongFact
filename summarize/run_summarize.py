@@ -8,7 +8,7 @@ from typing import List
 import textwrap
 import json
 
-from config import DEFAULT_SUMMARIZER_MODEL
+from config import DEFAULT_SUMMARIZER_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
 from summarize.model_summarizer import get_summarizer
 
 
@@ -53,16 +53,22 @@ def run_pipeline(
     load_in_8bit: bool = False,
     summary_max_new_tokens: int = 256,
     summary_batch_size: int = 1,
+    precision: str = None,
+    torch_compile: bool = None,
 ):
     chunks = chunk_text(text)
     result = {'chunks': chunks, 'local_summaries': [], 'fused': '', 'error': None}
     try:
+        effective_precision = PREFERRED_PRECISION if precision is None else precision
+        effective_compile = DEFAULT_TORCH_COMPILE if torch_compile is None else bool(torch_compile)
         summarizer = get_summarizer(
             model_name=model_name if use_model else None,
             device=device,
             load_in_8bit=load_in_8bit,
             max_length=summary_max_new_tokens,
             batch_size=summary_batch_size,
+            precision=effective_precision,
+            torch_compile=effective_compile,
         )
         # debug: log chunk counts
         print(f'[run_pipeline] num_chunks={len(chunks)}')
@@ -112,6 +118,8 @@ def main():
         load_in_8bit=args.load_in_8bit,
         max_length=args.summary_max_new_tokens,
         batch_size=args.summary_batch_size,
+        precision=PREFERRED_PRECISION,
+        torch_compile=DEFAULT_TORCH_COMPILE,
     )
     local_summaries = summarizer.summarize_chunks(chunks)
     fused = fuse_summaries(local_summaries)

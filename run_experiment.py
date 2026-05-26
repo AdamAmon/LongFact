@@ -3,7 +3,15 @@
 用于快速验证管线是否可跑通（小样本）。"""
 import argparse
 import json
-from config import DEFAULT_CORRECTOR_MODEL, DEFAULT_DATA_DIR, DEFAULT_NLI_MODEL, DEFAULT_SUMMARIZER_MODEL
+from config import (
+    DEFAULT_CORRECTOR_MODEL,
+    DEFAULT_DATA_DIR,
+    DEFAULT_NLI_MODEL,
+    DEFAULT_SUMMARIZER_MODEL,
+    DEFAULT_RETRIEVER_MODEL,
+    PREFERRED_PRECISION,
+    DEFAULT_TORCH_COMPILE,
+)
 from data.load_govreport import load_govreport
 from config import FALLBACK_TO_SUMMARY
 from summarize.run_summarize import run_pipeline
@@ -31,13 +39,32 @@ def run_sample(
     load_in_8bit: bool = False,
     summary_max_new_tokens: int = 256,
     summary_batch_size: int = 1,
+    precision: str = None,
+    torch_compile: bool = None,
 ):
     records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR))
     results = []
 
+    effective_precision = precision if precision is not None else PREFERRED_PRECISION
+    effective_compile = DEFAULT_TORCH_COMPILE if torch_compile is None else bool(torch_compile)
+    effective_model_name = model_name or DEFAULT_SUMMARIZER_MODEL
+
     # instantiate shared components once to avoid repeated loads
-    nli = NLIChecker(model_name=DEFAULT_NLI_MODEL, device=device, load_in_8bit=load_in_8bit)
-    corr = Corrector(model_name=model_name if use_model else DEFAULT_CORRECTOR_MODEL, device=device, load_in_8bit=load_in_8bit)
+    nli = NLIChecker(
+        model_name=DEFAULT_NLI_MODEL,
+        device=device,
+        load_in_8bit=load_in_8bit,
+        precision=effective_precision,
+        torch_compile=effective_compile,
+    )
+    corr = Corrector(
+        model_name=(effective_model_name if use_model else DEFAULT_CORRECTOR_MODEL),
+        device=device,
+        load_in_8bit=load_in_8bit,
+        precision=effective_precision,
+        torch_compile=effective_compile,
+    )
+    retr = Retriever(model_name=DEFAULT_RETRIEVER_MODEL, device=device)
 
     for rec in records:
         # skip samples that were flagged as missing document (unless fallback enabled)
@@ -64,18 +91,19 @@ def run_sample(
             out = run_pipeline(
                 doc,
                 use_model=use_model,
-                model_name=model_name,
+                model_name=effective_model_name,
                 device=device,
                 load_in_8bit=load_in_8bit,
                 summary_max_new_tokens=summary_max_new_tokens,
                 summary_batch_size=summary_batch_size,
+                precision=effective_precision,
+                torch_compile=effective_compile,
             )
             pred = out.get('fused', '')
             summ_error = out.get('error')
 
             # build retriever on document passages; simple chunking for evidence
             passages = out.get('chunks', []) or []
-            retr = Retriever()
             try:
                 retr.build_index(passages)
             except Exception as e:
@@ -88,8 +116,29 @@ def run_sample(
             support_rate, details = compute_support_rate(pred, doc, retr, nli, top_k=3)
             # perform corrections for sentences not supported
             corrected_sents = []
-            for d in details:
-                if not d.get('supported'):
+            # Batch unsupported sentences to reduce generation overhead.
+            unsupported_idx = [i for i, d in enumerate(details) if not d.get('supported')]
+            if unsupported_idx and hasattr(corr, 'correct_batch'):
+                evidences_list = [details[i].get('evidences', []) for i in unsupported_idx]
+                sentences_list = [details[i].get('sentence', '') for i in unsupported_idx]
+                try:
+                    corrected_batch = corr.correct_batch(evidences_list, sentences_list, batch_size=max(1, summary_batch_size))
+                except Exception as e:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print('run_experiment: corrector.correct_batch failed for sample', rec.get('id'), e)
+                    print(tb)
+                    corrected_batch = sentences_list
+                corrected_map = {idx: corrected_batch[pos] if pos < len(corrected_batch) else details[idx].get('sentence', '') for pos, idx in enumerate(unsupported_idx)}
+            else:
+                corrected_map = {}
+
+            for i, d in enumerate(details):
+                if d.get('supported'):
+                    corrected_sents.append(d.get('sentence', ''))
+                elif i in corrected_map:
+                    corrected_sents.append(corrected_map[i])
+                else:
                     try:
                         corrected = corr.correct(d.get('evidences', []), d.get('sentence', ''))
                     except Exception as e:
@@ -98,12 +147,9 @@ def run_sample(
                         print('run_experiment: corrector.correct failed for sample', rec.get('id'), e)
                         print(tb)
                         corrected = d.get('sentence', '')
-                        # attach error info to detail for auditing
                         d['error'] = str(e)
                         d['last_error'] = tb
                     corrected_sents.append(corrected)
-                else:
-                    corrected_sents.append(d.get('sentence', ''))
             corrected_pred = ' '.join(corrected_sents)
 
             corrected_support_rate, corrected_details = compute_support_rate(corrected_pred, doc, retr, nli, top_k=3)
@@ -190,6 +236,8 @@ def main():
     parser.add_argument('--model_name', type=str, default=DEFAULT_SUMMARIZER_MODEL)
     parser.add_argument('--device', type=int, default=-1)
     parser.add_argument('--load_in_8bit', action='store_true', help='尝试使用 bitsandbytes 的 8-bit 加载（若可用）')
+    parser.add_argument('--precision', type=str, default=None, choices=['auto', 'fp32', 'fp16', '8bit'], help='精度偏好（默认使用配置项）')
+    parser.add_argument('--torch_compile', action='store_true', help='尝试对支持的模型启用 torch.compile')
     parser.add_argument('--summary_max_new_tokens', type=int, default=256, help='每个 chunk 摘要生成的最大 token 数')
     parser.add_argument('--summary_batch_size', type=int, default=1, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
@@ -205,6 +253,8 @@ def main():
         load_in_8bit=args.load_in_8bit,
         summary_max_new_tokens=args.summary_max_new_tokens,
         summary_batch_size=args.summary_batch_size,
+        precision=args.precision,
+        torch_compile=args.torch_compile,
     )
     with open(args.out, 'w', encoding='utf-8') as f:
         for r in res:

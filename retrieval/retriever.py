@@ -2,7 +2,7 @@
 
 提供构建索引与检索 top-k 段的简单 API，同时支持混合检索（bm25 + embedding）以改进长文证据定位。
 """
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import os
 import numpy as np
 
@@ -25,17 +25,28 @@ except Exception as e:
     traceback.print_exc()
 
 
+from config import DEFAULT_RETRIEVER_MODEL, EMBEDDING_CACHE_DIR
+import hashlib
+
+
 class Retriever:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", use_bm25: bool = False, device: int = -1):
+    _MODEL_CACHE: Dict[str, object] = {}
+
+    def __init__(self, model_name: str = DEFAULT_RETRIEVER_MODEL, use_bm25: bool = False, device: int = -1):
         if SentenceTransformer is None:
             raise ImportError("sentence-transformers is required for Retriever")
         # device: -1 -> cpu, >=0 -> cuda:device
         device_str = 'cpu' if device == -1 else f'cuda:{device}'
         self.last_error = None
-        try:
-            self.model = SentenceTransformer(model_name, device=device_str)
-        except TypeError:
-            self.model = SentenceTransformer(model_name)
+        cache_key = f"{model_name}::{device_str}"
+        if cache_key in self._MODEL_CACHE:
+            self.model = self._MODEL_CACHE[cache_key]
+        else:
+            try:
+                self.model = SentenceTransformer(model_name, device=device_str)
+            except TypeError:
+                self.model = SentenceTransformer(model_name)
+            self._MODEL_CACHE[cache_key] = self.model
         self.index = None
         self.corpus: List[str] = []
         self.use_bm25 = use_bm25 and (BM25Okapi is not None)
@@ -51,18 +62,35 @@ class Retriever:
             self.index = None
             self.bm25 = None
             return
+        # Attempt to load embeddings from disk cache keyed by passages hash
+        cache_key = hashlib.md5('\n'.join(filtered).encode('utf-8')).hexdigest()
+        cache_path = EMBEDDING_CACHE_DIR / f"{cache_key}.npz"
+        embs = None
+        if cache_path.exists():
+            try:
+                loaded = np.load(str(cache_path))
+                embs = loaded['arr_0']
+                print(f'[Retriever] loaded embeddings from cache: {cache_path}')
+            except Exception:
+                embs = None
 
-        try:
-            embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            print('[Retriever] build_index encode failed:', e)
-            print(tb)
-            self.last_error = tb
-            self.index = None
-            self.bm25 = None
-            raise
+        if embs is None:
+            try:
+                embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print('[Retriever] build_index encode failed:', e)
+                print(tb)
+                self.last_error = tb
+                self.index = None
+                self.bm25 = None
+                raise
+            try:
+                np.savez_compressed(str(cache_path), embs)
+                print(f'[Retriever] saved embeddings to cache: {cache_path}')
+            except Exception:
+                pass
         # normalize embedding output to a 2D numpy array
         if isinstance(embs, list):
             embs = np.array(embs)

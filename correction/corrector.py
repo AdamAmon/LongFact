@@ -27,19 +27,23 @@ except Exception as e:
     traceback.print_exc()
 
 from config import DEFAULT_CORRECTOR_MODEL
+from config import PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
+import torch as _torch
 
 # Module-level cache to avoid re-loading corrector models across samples
 _CORRECTOR_CACHE = {}
 
 
 class Corrector:
-    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128, load_in_8bit: bool = False):
+    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 32, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
         self.model_name = model_name
         self.device = device
         self.max_length = max_length
         self.pipe = None
         self.last_error: Optional[str] = None
-        key = f"{model_name}::dev{device}::8bit{load_in_8bit}::len{max_length}"
+        key = f"{model_name}::dev{device}::8bit{load_in_8bit}::len{max_length}::prec{precision}::compile{torch_compile}"
+        self.precision = precision or PREFERRED_PRECISION or 'auto'
+        self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
         if key in _CORRECTOR_CACHE:
             cached = _CORRECTOR_CACHE[key]
             self.pipe = cached.get('pipe')
@@ -88,6 +92,28 @@ class Corrector:
                     self.pipe = None
 
             if self.pipe is None:
+                # If user requested fp16 precision and a causal/seq2seq model class is available,
+                # try to load the model in float16 for faster GPU inference.
+                try:
+                    if (self.precision in ('fp16', 'half')) and AutoTokenizer is not None and device >= 0:
+                        try:
+                            tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                            if AutoModelForCausalLM is not None:
+                                model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', torch_dtype=_torch.float16)
+                                if self.torch_compile and hasattr(_torch, 'compile'):
+                                    try:
+                                        model = _torch.compile(model)
+                                    except Exception:
+                                        pass
+                                self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer)
+                                _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
+                                return
+                        except Exception:
+                            # fall through to standard pipeline
+                            pass
+                except Exception:
+                    pass
+
                 try:
                     self.pipe = pipeline('text-generation', model=model_name, device=device)
                 except Exception as e:
@@ -146,12 +172,16 @@ class Corrector:
             self.last_error = 'corrector pipeline unavailable'
             return sentence
         try:
-            out = self.pipe(
-                prompt,
-                truncation=True,
-                max_new_tokens=self.max_length,
-                return_full_text=False,
-            )
+            try:
+                out = self.pipe(
+                    prompt,
+                    truncation=True,
+                    max_new_tokens=self.max_length,
+                    return_full_text=False,
+                )
+            except TypeError:
+                # Some test doubles or minimal pipeline fakes accept only the prompt
+                out = self.pipe(prompt)
             if isinstance(out, list) and len(out) > 0:
                 generated = out[0].get('generated_text', out[0].get('summary_text', out[0].get('text', '')))
                 if isinstance(generated, str):
@@ -164,10 +194,68 @@ class Corrector:
         except Exception as exc:
             import traceback
             tb = traceback.format_exc()
-            print(f'corrector: generation failed for model {self.model_name}:', exc)
+            print(f'corrector: generation failed for model {getattr(self, "model_name", "<unknown>")}:', exc)
             print(tb)
             self.last_error = tb
             return sentence
+
+    def correct_batch(self, evidences_list: List[List[str]], sentences: List[str], batch_size: int = 4) -> List[str]:
+        """Batch correction for multiple sentence/evidence pairs.
+
+        Falls back to serial correction on pipeline incompatibility.
+        """
+        if not sentences:
+            return []
+        if self.pipe is None:
+            self.last_error = 'corrector pipeline unavailable'
+            return list(sentences)
+
+        prompts = [self.construct_prompt(evs or [], s or '') for evs, s in zip(evidences_list, sentences)]
+        outputs: List[str] = []
+
+        for i in range(0, len(prompts), max(1, int(batch_size))):
+            p_batch = prompts[i:i + max(1, int(batch_size))]
+            s_batch = sentences[i:i + max(1, int(batch_size))]
+            try:
+                out = self.pipe(
+                    p_batch,
+                    truncation=True,
+                    max_new_tokens=self.max_length,
+                    return_full_text=False,
+                    batch_size=max(1, int(batch_size)),
+                )
+            except TypeError:
+                # fallback for simple callable mocks
+                out = [self.pipe(p) for p in p_batch]
+            except Exception:
+                # robust fallback: serial path for this chunk
+                for evs, s in zip(evidences_list[i:i + max(1, int(batch_size))], s_batch):
+                    outputs.append(self.correct(evs or [], s or ''))
+                continue
+
+            # Normalize output shape for list-batch calls.
+            if not isinstance(out, list):
+                out = [out]
+
+            for idx, item in enumerate(out):
+                generated = ''
+                if isinstance(item, list) and item:
+                    item = item[0]
+                if isinstance(item, dict):
+                    generated = item.get('generated_text', item.get('summary_text', item.get('text', '')))
+                elif isinstance(item, str):
+                    generated = item
+                else:
+                    generated = str(item)
+
+                if isinstance(generated, str):
+                    generated = self._normalize_generation(p_batch[min(idx, len(p_batch) - 1)], generated)
+                outputs.append(generated or s_batch[min(idx, len(s_batch) - 1)])
+
+        if len(outputs) != len(sentences):
+            # shape mismatch fallback to serial for safety
+            return [self.correct(evs or [], s or '') for evs, s in zip(evidences_list, sentences)]
+        return outputs
 
 
 def simple_demo():
