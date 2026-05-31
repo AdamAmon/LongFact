@@ -42,12 +42,20 @@ def sentence_split(text: str) -> List[str]:
     return out
 
 
-def compute_support_rate(summary: str, document: str, retriever, nli_checker, top_k: int = 5, threshold: float = 0.6) -> Tuple[float, List[Dict]]:
+def compute_support_rate(summary: str, document: str, retriever, nli_checker, top_k: int = 5, threshold: float = 0.6, show_progress: bool = False, progress_desc: str = 'NLI', progress_position: int = 2) -> Tuple[float, List[Dict]]:
     """对 summary 的每个句子检索证据并用 nli_checker 判定是否被支持，返回支持率与逐句详情列表。"""
     sents = sentence_split(summary)
     details = []
     supported = 0
-    for s in sents:
+    iterator = sents
+    if show_progress and sents:
+        try:
+            from tqdm import tqdm
+            iterator = tqdm(sents, desc=progress_desc, unit='sent', position=progress_position, leave=False, dynamic_ncols=True, mininterval=0.1)
+        except Exception:
+            iterator = sents
+
+    for s in iterator:
         # if retriever has no index (e.g., empty document), skip retrieval
         # use hasattr guard so lightweight test doubles without `bm25` still work.
         has_index = hasattr(retriever, 'index') and (getattr(retriever, 'index') is not None)

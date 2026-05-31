@@ -124,7 +124,16 @@ def run_sample(
                 print(tb)
 
             # instantiate NLI checker once per sample; respect CLI device and 8-bit flag
-            support_rate, details = compute_support_rate(pred, doc, retr, nli, top_k=3)
+            support_rate, details = compute_support_rate(
+                pred,
+                doc,
+                retr,
+                nli,
+                top_k=3,
+                show_progress=True,
+                progress_desc='NLI original',
+                progress_position=2,
+            )
             # perform corrections for sentences not supported
             corrected_sents = []
             # Batch unsupported sentences to reduce generation overhead.
@@ -133,7 +142,14 @@ def run_sample(
                 evidences_list = [details[i].get('evidences', []) for i in unsupported_idx]
                 sentences_list = [details[i].get('sentence', '') for i in unsupported_idx]
                 try:
-                    corrected_batch = corr.correct_batch(evidences_list, sentences_list, batch_size=max(1, summary_batch_size))
+                    corrected_batch = corr.correct_batch(
+                        evidences_list,
+                        sentences_list,
+                        batch_size=max(1, summary_batch_size),
+                        show_progress=True,
+                        progress_desc='Correction',
+                        progress_position=3,
+                    )
                 except Exception as e:
                     import traceback
                     tb = traceback.format_exc()
@@ -163,7 +179,16 @@ def run_sample(
                     corrected_sents.append(corrected)
             corrected_pred = ' '.join(corrected_sents)
 
-            corrected_support_rate, corrected_details = compute_support_rate(corrected_pred, doc, retr, nli, top_k=3)
+            corrected_support_rate, corrected_details = compute_support_rate(
+                corrected_pred,
+                doc,
+                retr,
+                nli,
+                top_k=3,
+                show_progress=True,
+                progress_desc='NLI corrected',
+                progress_position=2,
+            )
 
             try:
                 rouge_scores = compute_rouge(ref, pred) if ref else {}

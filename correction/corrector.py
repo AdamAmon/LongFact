@@ -298,7 +298,7 @@ class Corrector:
             self.last_error = tb
             return sentence
 
-    def correct_batch(self, evidences_list: List[List[str]], sentences: List[str], batch_size: int = 4) -> List[str]:
+    def correct_batch(self, evidences_list: List[List[str]], sentences: List[str], batch_size: int = 4, show_progress: bool = False, progress_desc: str = 'Correction', progress_position: int = 3) -> List[str]:
         """Batch correction for multiple sentence/evidence pairs.
 
         Falls back to serial correction on pipeline incompatibility.
@@ -312,23 +312,33 @@ class Corrector:
         prompts = [self.construct_prompt(evs or [], s or '') for evs, s in zip(evidences_list, sentences)]
         outputs: List[str] = []
 
-        for i in range(0, len(prompts), max(1, int(batch_size))):
-            p_batch = prompts[i:i + max(1, int(batch_size))]
-            s_batch = sentences[i:i + max(1, int(batch_size))]
+        batch_step = max(1, int(batch_size))
+        batch_indices = range(0, len(prompts), batch_step)
+        iterator = batch_indices
+        if show_progress and prompts:
+            try:
+                from tqdm import tqdm
+                iterator = tqdm(batch_indices, desc=progress_desc, unit='batch', position=progress_position, leave=False, dynamic_ncols=True, mininterval=0.1)
+            except Exception:
+                iterator = batch_indices
+
+        for i in iterator:
+            p_batch = prompts[i:i + batch_step]
+            s_batch = sentences[i:i + batch_step]
             try:
                 gen_cfg = None
                 if 'GenerationConfig' in globals() and GenerationConfig is not None:
                     gen_cfg = GenerationConfig(max_new_tokens=self.max_length, do_sample=False)
                 if gen_cfg is not None:
-                    out = self.pipe(p_batch, truncation=True, return_full_text=False, generation_config=gen_cfg, batch_size=max(1, int(batch_size)))
+                    out = self.pipe(p_batch, truncation=True, return_full_text=False, generation_config=gen_cfg, batch_size=batch_step)
                 else:
-                    out = self.pipe(p_batch, truncation=True, max_new_tokens=self.max_length, return_full_text=False, batch_size=max(1, int(batch_size)))
+                    out = self.pipe(p_batch, truncation=True, max_new_tokens=self.max_length, return_full_text=False, batch_size=batch_step)
             except TypeError:
                 # fallback for simple callable mocks
                 out = [self.pipe(p) for p in p_batch]
             except Exception:
                 # robust fallback: serial path for this chunk
-                for evs, s in zip(evidences_list[i:i + max(1, int(batch_size))], s_batch):
+                for evs, s in zip(evidences_list[i:i + batch_step], s_batch):
                     outputs.append(self.correct(evs or [], s or ''))
                 continue
 
