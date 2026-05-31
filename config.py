@@ -65,3 +65,7 @@ DEFAULT_TORCH_COMPILE = os.getenv("LONGFACT_TORCH_COMPILE", "0").strip().lower()
 # Embedding cache directory (for Retriever). Relative to project by default.
 EMBEDDING_CACHE_DIR = Path(os.getenv("LONGFACT_EMB_CACHE_DIR", PROJECT_ROOT / "data" / "emb_cache"))
 EMBEDDING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Retriever tuning
+DEFAULT_RETRIEVER_ENCODE_BATCH_SIZE = int(os.getenv("LONGFACT_RETRIEVER_ENCODE_BATCH_SIZE", "64"))
+# Retriever index method: 'auto'|'flat'|'hnsw'|'ivf'
+DEFAULT_RETRIEVER_INDEX_METHOD = os.getenv("LONGFACT_RETRIEVER_INDEX_METHOD", "auto")

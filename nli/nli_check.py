@@ -33,6 +33,8 @@ class NLIChecker:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
         self.precision = precision or PREFERRED_PRECISION or 'auto'
+        # whether to attempt torch.compile on the model (configurable)
+        self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
         self.gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
         # Try to use helper to pre-load model/tokenizer to avoid pipeline-internal defaults.
         self.tokenizer = None
@@ -179,10 +181,29 @@ class NLIChecker:
         # Use batch checking to improve throughput when possible
         try:
             pairs = self.check_batch(evidences, [hypothesis] * len(evidences))
-            # if batch returned error markers, force fallback to serial
+            # if batch returned error markers, attempt chunked processing before full serial fallback
             if any((isinstance(p, tuple) and p[0] == 'ERROR') for p in pairs):
-                raise RuntimeError('batch returned ERROR markers')
-            per = [(lab, sc, e) for (lab, sc), e in zip(pairs, evidences)]
+                # chunk into smaller batches to isolate problematic inputs
+                per = []
+                chunk_size = min(32, max(1, len(evidences)))
+                for i in range(0, len(evidences), chunk_size):
+                    chunk_ev = evidences[i:i+chunk_size]
+                    try:
+                        chunk_pairs = self.check_batch(chunk_ev, [hypothesis] * len(chunk_ev))
+                        # if chunk still contains errors, fall back to serial for that chunk
+                        if any((isinstance(p, tuple) and p[0] == 'ERROR') for p in chunk_pairs):
+                            for ev in chunk_ev:
+                                lab, sc = self.check(ev, hypothesis)
+                                per.append((lab, sc, ev))
+                        else:
+                            per.extend([(lab, sc, e) for (lab, sc), e in zip(chunk_pairs, chunk_ev)])
+                    except Exception:
+                        # safe serial fallback for this chunk
+                        for ev in chunk_ev:
+                            lab, sc = self.check(ev, hypothesis)
+                            per.append((lab, sc, ev))
+            else:
+                per = [(lab, sc, e) for (lab, sc), e in zip(pairs, evidences)]
         except Exception as e:
             # fallback to serial checks preserving error handling
             print('nli_check: batch check failed, falling back to serial checks:', e)

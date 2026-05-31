@@ -39,7 +39,7 @@ def run_sample(
     dataset_cache_dir: str = None,
     load_in_8bit: bool = False,
     summary_max_new_tokens: int = 256,
-    summary_batch_size: int = 1,
+    summary_batch_size: int = 4,
     precision: str = None,
     torch_compile: bool = None,
     start_offset: int = 0,
@@ -275,7 +275,7 @@ def main():
     parser.add_argument('--precision', type=str, default=None, choices=['auto', 'fp32', 'fp16', '8bit'], help='精度偏好（默认使用配置项）')
     parser.add_argument('--torch_compile', action='store_true', help='尝试对支持的模型启用 torch.compile')
     parser.add_argument('--summary_max_new_tokens', type=int, default=256, help='每个 chunk 摘要生成的最大 token 数')
-    parser.add_argument('--summary_batch_size', type=int, default=1, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
+    parser.add_argument('--summary_batch_size', type=int, default=4, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
     parser.add_argument('--start', type=int, default=0, help='开始偏移（用于分批处理）')
     parser.add_argument('--step', type=int, default=0, help='分批大小；>0 时按 step 分批（例如 50）')

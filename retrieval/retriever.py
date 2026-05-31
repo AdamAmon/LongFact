@@ -25,7 +25,7 @@ except Exception as e:
     traceback.print_exc()
 
 
-from config import DEFAULT_RETRIEVER_MODEL, EMBEDDING_CACHE_DIR
+from config import DEFAULT_RETRIEVER_MODEL, EMBEDDING_CACHE_DIR, DEFAULT_RETRIEVER_ENCODE_BATCH_SIZE, DEFAULT_RETRIEVER_INDEX_METHOD
 import hashlib
 
 
@@ -51,6 +51,8 @@ class Retriever:
         self.corpus: List[str] = []
         self.use_bm25 = use_bm25 and (BM25Okapi is not None)
         self.bm25 = None
+        # batch size to use when encoding large numbers of passages or queries (configurable)
+        self.encode_batch_size = DEFAULT_RETRIEVER_ENCODE_BATCH_SIZE
 
     def build_index(self, passages: List[str]):
         """建立向量索引并（可选）BM25 索引。"""
@@ -76,7 +78,7 @@ class Retriever:
 
         if embs is None:
             try:
-                embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False)
+                embs = self.model.encode(filtered, convert_to_numpy=True, show_progress_bar=False, batch_size=self.encode_batch_size)
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
@@ -120,10 +122,56 @@ class Retriever:
         dim = embs.shape[1]
         if faiss is None:
             raise ImportError("faiss-cpu is required for indexing")
-        self.index = faiss.IndexFlatIP(dim)
-        # normalize for inner product similarity
-        faiss.normalize_L2(embs)
-        self.index.add(embs)
+        # choose index type based on corpus size and config
+        index_method = DEFAULT_RETRIEVER_INDEX_METHOD
+        n = embs.shape[0]
+        # heuristics: allow env override via config; otherwise choose HNSW for medium, Flat for small
+        if index_method == 'auto':
+            if n >= 2000:
+                chosen = 'hnsw'
+            else:
+                chosen = 'flat'
+        else:
+            chosen = index_method
+
+        if chosen == 'hnsw':
+            # HNSW with Inner Product (approx. nearest neighbors)
+            try:
+                M = 32
+                efConstruction = 200
+                self.index = faiss.IndexHNSWFlat(dim, M)
+                # set efSearch to a sensible value
+                try:
+                    self.index.hnsw.efSearch = 64
+                except Exception:
+                    pass
+                faiss.normalize_L2(embs)
+                self.index.add(embs)
+            except Exception:
+                # fallback to flat
+                self.index = faiss.IndexFlatIP(dim)
+                faiss.normalize_L2(embs)
+                self.index.add(embs)
+        elif chosen == 'ivf':
+            # IVF requires training; choose nlist based on corpus size
+            nlist = min(max(16, n // 100), 4096)
+            quantizer = faiss.IndexFlatIP(dim)
+            self.index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+            faiss.normalize_L2(embs)
+            try:
+                self.index.train(embs)
+                self.index.add(embs)
+            except Exception:
+                # fallback to flat
+                self.index = faiss.IndexFlatIP(dim)
+                faiss.normalize_L2(embs)
+                self.index.add(embs)
+        else:
+            # flat exact index
+            self.index = faiss.IndexFlatIP(dim)
+            # normalize for inner product similarity
+            faiss.normalize_L2(embs)
+            self.index.add(embs)
 
         if self.use_bm25:
             # BM25 expects tokenized corpus
@@ -139,7 +187,7 @@ class Retriever:
             raise RuntimeError("Index not built. Call build_index() first.")
 
         try:
-            q_emb = self.model.encode([text], convert_to_numpy=True)
+            q_emb = self.model.encode([text], convert_to_numpy=True, batch_size=1)
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -174,6 +222,53 @@ class Retriever:
             return hybrid
 
         return emb_results
+
+    def query_batch(self, texts: List[str], top_k: int = 5, use_bm25_score: bool = False) -> List[List[Tuple[int, float]]]:
+        """Batch query: return list of hit lists for each input text.
+
+        Returns a list where each element is [(idx, score), ...] for that query.
+        """
+        if self.index is None:
+            raise RuntimeError("Index not built. Call build_index() first.")
+        try:
+            q_embs = self.model.encode(texts, convert_to_numpy=True, show_progress_bar=False, batch_size=self.encode_batch_size)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print('[Retriever] query_batch encode failed:', e)
+            print(tb)
+            self.last_error = tb
+            raise
+        q_embs = np.asarray(q_embs)
+        if q_embs.ndim == 1:
+            q_embs = q_embs.reshape(1, -1)
+        faiss.normalize_L2(q_embs)
+        D, I = self.index.search(q_embs, top_k)
+        results = []
+        for row_d, row_i in zip(D, I):
+            emb_results = [(int(i), float(d)) for i, d in zip(row_i, row_d)]
+            if use_bm25_score and self.bm25 is not None:
+                tokenized_q = []
+                # compute bm25 per query
+                for t in texts:
+                    tokenized_q = t.split()
+                    bm_scores = self.bm25.get_scores(tokenized_q)
+                    bm = np.array(bm_scores)
+                    if bm.max() > 0:
+                        bm = bm / (bm.max())
+                    emb_vals = [s for _, s in emb_results]
+                    emb_arr = np.array(emb_vals)
+                    if emb_arr.max() > 0:
+                        emb_arr = emb_arr / (emb_arr.max())
+                    hybrid = []
+                    for (idx, emb_score), emb_norm in zip(emb_results, emb_arr):
+                        hybrid_score = 0.6 * emb_norm + 0.4 * float(bm[idx])
+                        hybrid.append((idx, float(hybrid_score)))
+                    hybrid.sort(key=lambda x: x[1], reverse=True)
+                    results.append(hybrid)
+            else:
+                results.append(emb_results)
+        return results
 
 
 def simple_demo():

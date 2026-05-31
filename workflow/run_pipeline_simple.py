@@ -126,44 +126,13 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
         nli_score_corrected = nli_score
         supported_corrected = supported
 
-        start_corr = time.time()
+        # Defer correction to a batched step to reduce generation overhead.
+        # Collect unsupported sentences for batch correction and post-checking.
         if not supported:
-            try:
-                corrected = corr.correct(evidence, s)
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                print(f'run_pipeline_simple: corrector.correct failed for id={record.get("id")}:', e)
-                print(tb)
-                sample_error = sample_error or 'corrector_failed'
-                sample_last_error = tb
-                corrected = s
-            # Re-run per-evidence NLI on corrected sentence
-            if evidence:
-                try:
-                    nli_label_corrected, nli_score_corrected, _ = nli.check_with_evidence(evidence, corrected, strategy='max')
-                except Exception as e:
-                    import traceback
-                    tb = traceback.format_exc()
-                    print(f'run_pipeline_simple: nli.check_with_evidence (post-correction) failed for id={record.get("id")}:', e)
-                    print(tb)
-                    sample_error = sample_error or 'post_correction_nli_failed'
-                    sample_last_error = tb
-                    nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
-            else:
-                premise = doc[:2048]
-                try:
-                    nli_label_corrected, nli_score_corrected = nli.check(premise, corrected)
-                except Exception as e:
-                    import traceback
-                    tb = traceback.format_exc()
-                    print(f'run_pipeline_simple: post-correction fallback NLI failed for id={record.get("id")}:', e)
-                    print(tb)
-                    sample_error = sample_error or 'post_correction_nli_fallback_failed'
-                    sample_last_error = tb
-                    nli_label_corrected, nli_score_corrected = 'ERROR', 0.0
-            supported_corrected = (nli_label_corrected.upper() in ('ENTAILMENT', 'ENTAILS')) and nli_score_corrected >= 0.6
-        end_corr = time.time()
+            # append placeholder entry; actual correction and post-NLI will be done after loop
+            # we store evidence and the original sentence for later batched correction
+            # Note: timing for correction will be filled after batch correction
+            pass
 
         # timing summary for this sentence
         timing = {
@@ -188,6 +157,59 @@ def run_one(record, summarizer_model: str, retriever_model: str, device: int = -
             'error': sample_error,
             'last_error': sample_last_error,
         })
+
+    # Batch-correct unsupported sentences to reduce model calls
+    unsupported_idx = [i for i, it in enumerate(sent_results) if not it.get('supported')]
+    if unsupported_idx:
+        evidences_list = [sent_results[i].get('evidence', []) for i in unsupported_idx]
+        sentences_list = [sent_results[i].get('sentence', '') for i in unsupported_idx]
+        corr_start = time.time()
+        try:
+            if hasattr(corr, 'correct_batch'):
+                corrected_batch = corr.correct_batch(evidences_list, sentences_list, batch_size=max(1, len(sentences_list)), show_progress=False, progress_desc='Correction')
+            else:
+                corrected_batch = [corr.correct(evs, s) for evs, s in zip(evidences_list, sentences_list)]
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f'run_pipeline_simple: batch correction failed for id={record.get("id")}:', e)
+            print(tb)
+            corrected_batch = sentences_list
+        corr_end = time.time()
+        total_corr_time = corr_end - corr_start
+        # assign corrected results and run post-correction NLI where needed
+        per_item_time = total_corr_time / max(1, len(corrected_batch))
+        for pos, idx in enumerate(unsupported_idx):
+            corrected = corrected_batch[pos] if pos < len(corrected_batch) else sentences_list[pos]
+            entry = sent_results[idx]
+            entry['corrected'] = corrected
+            # if corrected identical to original, reuse original NLI
+            if corrected == entry.get('sentence', ''):
+                entry['nli_label_corrected'] = entry.get('nli_label')
+                entry['nli_score_corrected'] = entry.get('nli_score')
+                entry['supported_corrected'] = entry.get('supported')
+            else:
+                try:
+                    if entry.get('evidence'):
+                        lab, sc, _ = nli.check_with_evidence(entry.get('evidence', []), corrected, strategy='max')
+                    else:
+                        lab, sc = nli.check(doc[:2048], corrected)
+                    entry['nli_label_corrected'] = lab
+                    entry['nli_score_corrected'] = sc
+                    entry['supported_corrected'] = (lab.upper() in ('ENTAILMENT', 'ENTAILS')) and sc >= 0.6
+                except Exception:
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f'run_pipeline_simple: post-correction nli failed for id={record.get("id")}:', tb)
+                    entry['nli_label_corrected'] = 'ERROR'
+                    entry['nli_score_corrected'] = 0.0
+                    entry['supported_corrected'] = False
+            # update correction effect
+            entry['correction_effect'] = True if (entry['supported_corrected'] and not entry.get('supported')) else (False if (entry['supported_corrected'] == entry.get('supported')) else None)
+            # set timing
+            t = entry.get('timing', {})
+            t['correction_time'] = per_item_time
+            entry['timing'] = t
 
     out = {
         'id': record.get('id'),

@@ -9,12 +9,17 @@ except Exception as e:
     print('evaluate: rouge_score import failed:', e)
     traceback.print_exc()
 
+# cache a RougeScorer instance to avoid repeated construction overhead
+_ROUGE_SCORER = None
+
 
 def compute_rouge(ref: str, pred: str) -> Dict[str, float]:
     if rouge_scorer is None:
         raise ImportError('rouge_score is required to compute ROUGE')
-    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'], use_stemmer=True)
-    scores = scorer.score(ref, pred)
+    global _ROUGE_SCORER
+    if _ROUGE_SCORER is None:
+        _ROUGE_SCORER = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'], use_stemmer=True)
+    scores = _ROUGE_SCORER.score(ref, pred)
     out = {}
     for k, v in scores.items():
         out[f'{k}_precision'] = v.precision
@@ -55,7 +60,19 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
         except Exception:
             iterator = sents
 
-    for s in iterator:
+    # If retriever supports batch queries, perform them to reduce encoding overhead
+    hits_list = None
+    if hasattr(retriever, 'query_batch') and sents:
+        try:
+            hits_list = retriever.query_batch(sents, top_k=top_k)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print('evaluate: retriever.query_batch failed:', e)
+            print(tb)
+            hits_list = None
+
+    for idx, s in enumerate(iterator if not hits_list else sents):
         # if retriever has no index (e.g., empty document), skip retrieval
         # use hasattr guard so lightweight test doubles without `bm25` still work.
         has_index = hasattr(retriever, 'index') and (getattr(retriever, 'index') is not None)
@@ -65,8 +82,11 @@ def compute_support_rate(summary: str, document: str, retriever, nli_checker, to
             evidences = []
         else:
             try:
-                hits = retriever.query(s, top_k=top_k)
-                evidences = [retriever.corpus[idx] for idx, _ in hits if idx is not None and idx < len(retriever.corpus)]
+                if hits_list is not None:
+                    hits = hits_list[idx]
+                else:
+                    hits = retriever.query(s, top_k=top_k)
+                evidences = [retriever.corpus[i] for i, _ in hits if i is not None and i < len(retriever.corpus)]
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()

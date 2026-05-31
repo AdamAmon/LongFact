@@ -27,7 +27,7 @@ _SUMMARIZER_CACHE: Dict[str, object] = {}
 
 
 class HFLocalSummarizer:
-    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
+    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 4, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
         if pipeline is None:
             raise ImportError('transformers is required for HFLocalSummarizer')
         self.max_length = max_length
@@ -316,7 +316,7 @@ class FallbackSummarizer:
         return out
 
 
-def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
+def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 4, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
     effective_gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
     key = f'{model_name}::dev{device}::len{max_length}::8bit{load_in_8bit}::bs{batch_size}::prec{precision}::compile{torch_compile}::gpuonly{effective_gpu_only}'
     if model_name is None:
