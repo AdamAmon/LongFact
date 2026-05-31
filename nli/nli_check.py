@@ -25,6 +25,7 @@ except Exception:
     load_model_and_tokenizer = None
 
 from config import DEFAULT_NLI_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
+from config import DEFAULT_NLI_BATCH_SIZE
 
 
 class NLIChecker:
@@ -149,14 +150,68 @@ class NLIChecker:
         if len(premises) != len(hypotheses):
             raise ValueError("premises and hypotheses must have the same length")
         try:
-            inputs = self.tokenizer(premises, hypotheses, return_tensors='pt', truncation=True, padding=True, max_length=1024).to(self.device)
-            with torch.no_grad():
-                logits = self.model(**inputs).logits
-                probs = torch.softmax(logits, dim=-1)
-                max_scores, idxs = torch.max(probs, dim=-1)
-                labels = [self.id2label.get(int(i.item()), str(i.item())) for i in idxs]
-                self.last_error = None
-                return list(zip(labels, [float(s.item()) for s in max_scores]))
+            # Heuristic: bucket by tokenized premise length to reduce padding inefficiency.
+            # Compute token lengths for premises (fast single-tokenize pass)
+            enc = None
+            try:
+                # tokenize premises together with hypotheses (pair) to be compatible with tokenizers
+                enc = self.tokenizer(premises, hypotheses, truncation=True, padding=False)
+                lengths = [len(x) for x in enc.get('input_ids', [])]
+                if not lengths:
+                    raise RuntimeError('empty tokenization result')
+            except Exception:
+                # fallback: per-item pair tokenization
+                lengths = []
+                for p, h in zip(premises, hypotheses):
+                    try:
+                        ids = self.tokenizer(p, h, truncation=True).get('input_ids')
+                    except Exception:
+                        try:
+                            ids = self.tokenizer(p, truncation=True).get('input_ids')
+                        except Exception:
+                            ids = None
+                    lengths.append(len(ids) if ids is not None else max(1, len(p.split())))
+
+            # define bins (in tokens); choices tuned for typical NLI lengths
+            bins = [64, 128, 256, 512, 1024]
+            # assign each example to a bin index
+            bucket_map = {}
+            for idx, l in enumerate(lengths):
+                for b_i, b in enumerate(bins):
+                    if l <= b:
+                        bucket_map.setdefault(b_i, []).append(idx)
+                        break
+                else:
+                    # longer than largest bin
+                    bucket_map.setdefault(len(bins) - 1, []).append(idx)
+
+            outputs = [None] * len(premises)
+            # process each bucket separately
+            for b_i, indices in bucket_map.items():
+                if not indices:
+                    continue
+                # further split bucket into manageable minibatches to avoid OOM
+                for start in range(0, len(indices), DEFAULT_NLI_BATCH_SIZE):
+                    sub_idx = indices[start:start + DEFAULT_NLI_BATCH_SIZE]
+                    batch_p = [premises[i] for i in sub_idx]
+                    batch_h = [hypotheses[i] for i in sub_idx]
+                    inputs = self.tokenizer(batch_p, batch_h, return_tensors='pt', truncation=True, padding=True, max_length=bins[b_i]).to(self.device)
+                    with torch.no_grad():
+                        logits = self.model(**inputs).logits
+                        probs = torch.softmax(logits, dim=-1)
+                        max_scores, idxs = torch.max(probs, dim=-1)
+                        labels = [self.id2label.get(int(i.item()), str(i.item())) for i in idxs]
+                        for pos, orig_idx in enumerate(sub_idx):
+                            outputs[orig_idx] = (labels[pos], float(max_scores[pos].item()))
+
+            if any(o is None for o in outputs):
+                # as a safety net, fill missing with error markers
+                for i, o in enumerate(outputs):
+                    if o is None:
+                        outputs[i] = ('ERROR', 0.0)
+
+            self.last_error = None
+            return outputs
         except Exception as e:
             err = traceback.format_exc()
             print('nli_check: batch inference failed:', e)

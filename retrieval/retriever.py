@@ -119,6 +119,27 @@ class Retriever:
             # single vector -> make it 2D
             embs = embs.reshape(1, -1)
 
+        # Attempt to load a prebuilt FAISS index for this corpus (fast path)
+        index_path = EMBEDDING_CACHE_DIR / f"{cache_key}.index"
+        if index_path.exists():
+            try:
+                idx = faiss.read_index(str(index_path))
+                # sanity check: index ntotal should match number of embeddings
+                try:
+                    if idx.ntotal == embs.shape[0]:
+                        self.index = idx
+                        print(f'[Retriever] loaded faiss index from cache: {index_path}')
+                        # also ensure bm25 is set below if needed
+                        if self.use_bm25:
+                            tokenized = [p.split() for p in passages]
+                            self.bm25 = BM25Okapi(tokenized)
+                        return
+                except Exception:
+                    # index mismatch; continue to build a new one
+                    pass
+            except Exception:
+                pass
+
         dim = embs.shape[1]
         if faiss is None:
             raise ImportError("faiss-cpu is required for indexing")
@@ -147,6 +168,10 @@ class Retriever:
                     pass
                 faiss.normalize_L2(embs)
                 self.index.add(embs)
+                try:
+                    faiss.write_index(self.index, str(index_path))
+                except Exception:
+                    pass
             except Exception:
                 # fallback to flat
                 self.index = faiss.IndexFlatIP(dim)
@@ -161,6 +186,10 @@ class Retriever:
             try:
                 self.index.train(embs)
                 self.index.add(embs)
+                try:
+                    faiss.write_index(self.index, str(index_path))
+                except Exception:
+                    pass
             except Exception:
                 # fallback to flat
                 self.index = faiss.IndexFlatIP(dim)
@@ -172,6 +201,10 @@ class Retriever:
             # normalize for inner product similarity
             faiss.normalize_L2(embs)
             self.index.add(embs)
+            try:
+                faiss.write_index(self.index, str(index_path))
+            except Exception:
+                pass
 
         if self.use_bm25:
             # BM25 expects tokenized corpus
@@ -187,7 +220,7 @@ class Retriever:
             raise RuntimeError("Index not built. Call build_index() first.")
 
         try:
-            q_emb = self.model.encode([text], convert_to_numpy=True, batch_size=1)
+            q_emb = self.model.encode([text], convert_to_numpy=True)
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -231,7 +264,7 @@ class Retriever:
         if self.index is None:
             raise RuntimeError("Index not built. Call build_index() first.")
         try:
-            q_embs = self.model.encode(texts, convert_to_numpy=True, show_progress_bar=False, batch_size=self.encode_batch_size)
+            q_embs = self.model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

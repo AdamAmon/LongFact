@@ -69,3 +69,5 @@ EMBEDDING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_RETRIEVER_ENCODE_BATCH_SIZE = int(os.getenv("LONGFACT_RETRIEVER_ENCODE_BATCH_SIZE", "64"))
 # Retriever index method: 'auto'|'flat'|'hnsw'|'ivf'
 DEFAULT_RETRIEVER_INDEX_METHOD = os.getenv("LONGFACT_RETRIEVER_INDEX_METHOD", "auto")
+# NLI batch size (number of pairs to process per bucket)
+DEFAULT_NLI_BATCH_SIZE = int(os.getenv("LONGFACT_NLI_BATCH_SIZE", "32"))
