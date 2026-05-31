@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import time
 from config import (
     DEFAULT_CORRECTOR_MODEL,
     DEFAULT_DATA_DIR,
@@ -43,6 +44,7 @@ def run_sample(
     precision: str = None,
     torch_compile: bool = None,
     start_offset: int = 0,
+    top_k: int = 3,
 ):
     records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR), start_index=start_offset)
     results = []
@@ -96,9 +98,11 @@ def run_sample(
             })
             continue
 
+        sample_t0 = time.perf_counter()
         try:
             doc = rec['document']
             ref = rec.get('summary', '') or ''
+            t0 = time.perf_counter()
             out = run_pipeline(
                 doc,
                 use_model=use_model,
@@ -110,30 +114,37 @@ def run_sample(
                 precision=effective_precision,
                 torch_compile=effective_compile,
             )
+            summarization_time = time.perf_counter() - t0
             pred = out.get('fused', '')
             summ_error = out.get('error')
 
             # build retriever on document passages; simple chunking for evidence
             passages = out.get('chunks', []) or []
+            # build retriever on document passages; simple chunking for evidence
             try:
+                t0 = time.perf_counter()
                 retr.build_index(passages)
+                retriever_build_time = time.perf_counter() - t0
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
                 print('run_experiment: retriever.build_index failed for sample', rec.get('id'), e)
                 print(tb)
+                retriever_build_time = None
 
             # instantiate NLI checker once per sample; respect CLI device and 8-bit flag
+            t0 = time.perf_counter()
             support_rate, details = compute_support_rate(
                 pred,
                 doc,
                 retr,
                 nli,
-                top_k=3,
+                top_k=top_k,
                 show_progress=True,
                 progress_desc='NLI original',
                 progress_position=2,
             )
+            nli_original_time = time.perf_counter() - t0
             # perform corrections for sentences not supported
             corrected_sents = []
             # Batch unsupported sentences to reduce generation overhead.
@@ -142,6 +153,7 @@ def run_sample(
                 evidences_list = [details[i].get('evidences', []) for i in unsupported_idx]
                 sentences_list = [details[i].get('sentence', '') for i in unsupported_idx]
                 try:
+                    t0 = time.perf_counter()
                     corrected_batch = corr.correct_batch(
                         evidences_list,
                         sentences_list,
@@ -150,12 +162,14 @@ def run_sample(
                         progress_desc='Correction',
                         progress_position=3,
                     )
+                    correction_time = time.perf_counter() - t0
                 except Exception as e:
                     import traceback
                     tb = traceback.format_exc()
                     print('run_experiment: corrector.correct_batch failed for sample', rec.get('id'), e)
                     print(tb)
                     corrected_batch = sentences_list
+                    correction_time = None
                 corrected_map = {idx: corrected_batch[pos] if pos < len(corrected_batch) else details[idx].get('sentence', '') for pos, idx in enumerate(unsupported_idx)}
             else:
                 corrected_map = {}
@@ -179,34 +193,42 @@ def run_sample(
                     corrected_sents.append(corrected)
             corrected_pred = ' '.join(corrected_sents)
 
+            t0 = time.perf_counter()
             corrected_support_rate, corrected_details = compute_support_rate(
                 corrected_pred,
                 doc,
                 retr,
                 nli,
-                top_k=3,
+                top_k=top_k,
                 show_progress=True,
                 progress_desc='NLI corrected',
                 progress_position=2,
             )
+            nli_corrected_time = time.perf_counter() - t0
 
             try:
+                t0 = time.perf_counter()
                 rouge_scores = compute_rouge(ref, pred) if ref else {}
+                rouge_time = time.perf_counter() - t0
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
                 print('run_experiment: compute_rouge failed for prediction', rec.get('id'), e)
                 print(tb)
                 rouge_scores = {}
+                rouge_time = None
 
             try:
+                t0 = time.perf_counter()
                 rouge_corrected = compute_rouge(ref, corrected_pred) if ref else {}
+                rouge_corrected_time = time.perf_counter() - t0
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
                 print('run_experiment: compute_rouge failed for corrected prediction', rec.get('id'), e)
                 print(tb)
                 rouge_corrected = {}
+                rouge_corrected_time = None
 
             prediction_length = _summary_length_stats(pred)
             corrected_length = _summary_length_stats(corrected_pred)
@@ -239,6 +261,16 @@ def run_sample(
                     'fused': out.get('fused'),
                     'error': out.get('error'),
                 },
+                'timing': {
+                    'summarization_time': summarization_time if 'summarization_time' in locals() else None,
+                    'retriever_build_time': retriever_build_time if 'retriever_build_time' in locals() else None,
+                    'nli_original_time': nli_original_time if 'nli_original_time' in locals() else None,
+                    'correction_time': correction_time if 'correction_time' in locals() else None,
+                    'nli_corrected_time': nli_corrected_time if 'nli_corrected_time' in locals() else None,
+                    'rouge_time': rouge_time if 'rouge_time' in locals() else None,
+                    'rouge_corrected_time': rouge_corrected_time if 'rouge_corrected_time' in locals() else None,
+                    'total_time': time.perf_counter() - sample_t0,
+                },
             })
         except Exception as e:
             import traceback
@@ -260,6 +292,7 @@ def run_sample(
                 'error': str(e),
                 'last_error': tb,
                 'summarization_debug': rec.get('document') if isinstance(rec.get('document'), dict) else {'chunks': None},
+                'timing': {'total_time': time.perf_counter() - sample_t0},
             })
 
     return results
@@ -279,6 +312,7 @@ def main():
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
     parser.add_argument('--start', type=int, default=0, help='开始偏移（用于分批处理）')
     parser.add_argument('--step', type=int, default=0, help='分批大小；>0 时按 step 分批（例如 50）')
+    parser.add_argument('--top_k', type=int, default=3, help='检索时每句证据的 top_k 大小，影响 NLI 调用次数')
     parser.add_argument('--out', type=str, default='experiment_results.jsonl')
     args = parser.parse_args()
     total_written = 0
@@ -307,6 +341,7 @@ def main():
                 precision=args.precision,
                 torch_compile=args.torch_compile,
                 start_offset=batch_start,
+                top_k=args.top_k,
             )
             mode = 'a' if os.path.exists(args.out) else 'w'
             with open(args.out, mode, encoding='utf-8') as f:
@@ -327,6 +362,7 @@ def main():
             precision=args.precision,
             torch_compile=args.torch_compile,
             start_offset=args.start,
+            top_k=args.top_k,
         )
         with open(args.out, 'w', encoding='utf-8') as f:
             for r in res:
