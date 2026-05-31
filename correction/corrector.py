@@ -35,7 +35,7 @@ _CORRECTOR_CACHE = {}
 
 
 class Corrector:
-    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
+    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
         self.model_name = model_name
         self.device = device
         self.max_length = max_length
@@ -44,6 +44,7 @@ class Corrector:
         key = f"{model_name}::dev{device}::8bit{load_in_8bit}::len{max_length}::prec{precision}::compile{torch_compile}"
         self.precision = precision or PREFERRED_PRECISION or 'auto'
         self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
+        self.gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
         if key in _CORRECTOR_CACHE:
             cached = _CORRECTOR_CACHE[key]
             self.pipe = cached.get('pipe')
@@ -56,7 +57,14 @@ class Corrector:
                 load_model_and_tokenizer = None
             if load_model_and_tokenizer is not None:
                 try:
-                    model_obj, tokenizer_obj = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=load_in_8bit, torch_dtype=(_torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None))
+                    model_obj, tokenizer_obj = load_model_and_tokenizer(
+                        model_name,
+                        model_kind='causal',
+                        load_in_8bit=load_in_8bit,
+                        torch_dtype=(_torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None),
+                        device=device,
+                        gpu_only=self.gpu_only,
+                    )
                     if model_obj is not None and tokenizer_obj is not None:
                         try:
                             if self.torch_compile and hasattr(_torch, 'compile'):
@@ -64,7 +72,7 @@ class Corrector:
                                     model_obj = _torch.compile(model_obj)
                                 except Exception:
                                     pass
-                            self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj, device=device)
+                            self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj)
                             _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
                             return
                         except Exception:
@@ -85,7 +93,7 @@ class Corrector:
                     # Qwen-style corrector models are causal LMs, so prefer the causal path first.
                     if AutoModelForCausalLM is not None:
                         try:
-                            model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                            model = AutoModelForCausalLM.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', quantization_config=quant_cfg)
                             if hasattr(model, 'generation_config'):
                                 try:
                                     model.generation_config.max_length = None
@@ -106,7 +114,7 @@ class Corrector:
                             self.pipe = None
                     if self.pipe is None and AutoModelForSeq2SeqLM is not None:
                         try:
-                            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', quantization_config=quant_cfg)
                             if hasattr(model, 'generation_config'):
                                 try:
                                     model.generation_config.max_length = None
@@ -148,7 +156,7 @@ class Corrector:
                             except TypeError:
                                 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
                             if AutoModelForCausalLM is not None:
-                                model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', torch_dtype=_torch.float16)
+                                model = AutoModelForCausalLM.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', torch_dtype=_torch.float16)
                                 if hasattr(model, 'generation_config'):
                                     try:
                                         model.generation_config.max_length = None
@@ -184,8 +192,12 @@ class Corrector:
                             tokenizer.clean_up_tokenization_spaces = False
                         except Exception:
                             pass
+                        if self.gpu_only and device >= 0:
+                            raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                         self.pipe = pipeline('text-generation', model=model_name, tokenizer=tokenizer, device=device)
                     else:
+                        if self.gpu_only and device >= 0:
+                            raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                         self.pipe = pipeline('text-generation', model=model_name, device=device)
                 except Exception as e:
                     import traceback
@@ -203,8 +215,12 @@ class Corrector:
                                 tokenizer.clean_up_tokenization_spaces = False
                             except Exception:
                                 pass
+                            if self.gpu_only and device >= 0:
+                                raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                             self.pipe = pipeline('text2text-generation', model=model_name, tokenizer=tokenizer, device=device)
                         else:
+                            if self.gpu_only and device >= 0:
+                                raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                             self.pipe = pipeline('text2text-generation', model=model_name, device=device)
                     except Exception as e2:
                         tb2 = traceback.format_exc()

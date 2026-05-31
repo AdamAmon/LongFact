@@ -28,23 +28,31 @@ from config import DEFAULT_NLI_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
 
 
 class NLIChecker:
-    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
+    def __init__(self, model_name: str = DEFAULT_NLI_MODEL, device: int = -1, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False, gpu_only: bool = None):
         if AutoTokenizer is None or AutoModelForSequenceClassification is None:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
         self.precision = precision or PREFERRED_PRECISION or 'auto'
+        self.gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
         # Try to use helper to pre-load model/tokenizer to avoid pipeline-internal defaults.
         self.tokenizer = None
         self.model = None
         if load_model_and_tokenizer is not None:
             try:
                 # Sequence classification model
-                model_obj, tok = load_model_and_tokenizer(model_name, model_kind='seq_class', load_in_8bit=load_in_8bit, torch_dtype=(torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None))
+                model_obj, tok = load_model_and_tokenizer(
+                    model_name,
+                    model_kind='seq_class',
+                    load_in_8bit=load_in_8bit,
+                    torch_dtype=(torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None),
+                    device=device,
+                    gpu_only=self.gpu_only,
+                )
                 # helper may return model/tokenizer or None; use what's available
                 if tok is not None:
                     self.tokenizer = tok
                 if model_obj is not None:
-                    self.model = model_obj.to(self.device) if hasattr(model_obj, 'to') else model_obj
+                    self.model = model_obj
             except Exception:
                 self.tokenizer = None
                 self.model = None
@@ -64,7 +72,7 @@ class NLIChecker:
             if load_in_8bit and BitsAndBytesConfig is not None and AutoModelForSequenceClassification is not None:
                 try:
                     bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
-                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', quantization_config=bnb_cfg, trust_remote_code=True)
+                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', quantization_config=bnb_cfg, trust_remote_code=True)
                 except Exception:
                     self.model = None
 
@@ -73,7 +81,7 @@ class NLIChecker:
                 try:
                     if (self.precision in ('fp16', 'half')) and device >= 0 and AutoModelForSequenceClassification is not None:
                         try:
-                            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', torch_dtype=torch.float16)
+                            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', torch_dtype=torch.float16)
                             if self.torch_compile and hasattr(torch, 'compile'):
                                 try:
                                     self.model = torch.compile(self.model)

@@ -126,7 +126,7 @@ python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out 
 长度分桶与案例导出：
 
 ```powershell
-python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out results/summary_n500_qwen.json --cases-out results/cases_n500_qwen.json --csv-out results/length_buckets_n500_qwen.csv
+python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out results/summary_n500_qwen.json --cases-out results/cases_n500_qwen.json --csv-out results/length_buckets_n500_qwen.csv --case-count 10 --bucket-by token
 ```
 
 ## 已验证结果
@@ -141,8 +141,8 @@ python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out 
 ## 新增分析能力
 
 - 每条样本现在还会记录 `corrected_support_rate`、`prediction_length`、`corrected_length`、`support_rate_delta` 和 `rouge1_fmeasure_delta`。
-- `scripts/analyze_results.py` 现在会输出长度分桶统计，默认按摘要句子数分为 `1-3`、`4-6`、`7-10`、`11-15`、`16+` 五档。
-- 分析脚本支持额外导出案例文件和 CSV 表格，便于直接放进实验报告。
+- `scripts/analyze_results.py` 现在会输出长度分桶统计，默认按摘要 token 数分为 `1-3`、`4-6`、`7-10`、`11-15`、`16+` 五档，也可用 `--bucket-by sentence` 切回句子数分桶。
+- 分析脚本支持额外导出案例文件和 CSV 表格，且 `--case-count 10` 可直接导出足够写报告的成功/失败案例。
 
 ## 输出字段说明
 
@@ -152,7 +152,7 @@ python scripts/analyze_results.py --in results/experiment_n500_qwen.jsonl --out 
 - `corrected_support_rate`：纠错后摘要的支持率。
 - `rouge` / `rouge_corrected`：纠错前后 ROUGE 分数。
 - `details`：逐句 NLI 结果与证据。
-- `prediction_length` / `corrected_length`：摘要长度统计，便于做 3.2.1 的长度分桶分析。
+- `prediction_length` / `corrected_length`：摘要长度统计，包含句子数与 token 数，便于做 3.2.1 的长度分桶分析。
 - `support_rate_delta` / `rouge1_fmeasure_delta`：纠错前后变化量，便于抽取成功和失败案例。
 - `summarization_debug`：分块、局部摘要、融合摘要与错误信息的调试快照。
 

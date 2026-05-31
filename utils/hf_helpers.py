@@ -72,6 +72,8 @@ def load_model_and_tokenizer(
     model_kind: str = 'causal',
     load_in_8bit: bool = False,
     torch_dtype: Optional[object] = None,
+    device: Optional[int] = None,
+    gpu_only: Optional[bool] = None,
     device_map: Optional[str] = 'auto',
     trust_remote_code: bool = True,
 ) -> Tuple[Optional[object], Optional[object]]:
@@ -81,16 +83,19 @@ def load_model_and_tokenizer(
     """
     tokenizer = load_tokenizer(model_name, use_fast=True, prefer_clean=True)
     model = None
+    if gpu_only is None:
+        gpu_only = device is not None and device >= 0
+    effective_device_map = {'': device} if gpu_only and device is not None and device >= 0 else device_map
     # Try 8-bit path first if requested
     if load_in_8bit and BitsAndBytesConfig is not None:
         try:
             bnb = BitsAndBytesConfig(load_in_8bit=True)
             if model_kind == 'causal' and AutoModelForCausalLM is not None:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=effective_device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
         except Exception:
             model = None
 
@@ -98,11 +103,11 @@ def load_model_and_tokenizer(
     if model is None and torch_dtype is not None:
         try:
             if model_kind == 'causal' and AutoModelForCausalLM is not None:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
         except Exception:
             model = None
 
@@ -110,11 +115,11 @@ def load_model_and_tokenizer(
     if model is None:
         try:
             if model_kind == 'causal' and AutoModelForCausalLM is not None:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, trust_remote_code=trust_remote_code)
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=effective_device_map, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=device_map, trust_remote_code=trust_remote_code)
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=device_map, trust_remote_code=trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, trust_remote_code=trust_remote_code)
         except Exception:
             model = None
 

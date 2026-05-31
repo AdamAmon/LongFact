@@ -40,6 +40,19 @@ def get_sentence_count(rec):
     return len(sentence_split(get_prediction_text(rec)))
 
 
+def get_token_count(rec):
+    length = rec.get('prediction_length', {}).get('token_count')
+    if isinstance(length, int):
+        return length
+    return len((get_prediction_text(rec) or '').split())
+
+
+def get_length_value(rec, bucket_by):
+    if bucket_by == 'token':
+        return get_token_count(rec)
+    return get_sentence_count(rec)
+
+
 def bucket_label(sentence_count):
     for lower, upper, label in LENGTH_BUCKETS:
         if upper is None:
@@ -113,6 +126,7 @@ def select_cases(records, case_count):
             'id': rec.get('id'),
             'bucket': bucket_label(get_sentence_count(rec)),
             'sentence_count': get_sentence_count(rec),
+            'token_count': get_token_count(rec),
             'support_rate': safe_float(rec.get('support_rate')),
             'corrected_support_rate': safe_float(rec.get('corrected_support_rate')),
             'support_rate_delta': support_delta,
@@ -152,6 +166,7 @@ def main():
     parser.add_argument('--preview', action='store_true', help='output a preview (limited support_rate_samples) instead of full list')
     parser.add_argument('--preview-size', type=int, default=5, help='preview sample size when --preview is set')
     parser.add_argument('--case-count', type=int, default=10, help='number of cases to export for report writing')
+    parser.add_argument('--bucket-by', choices=['sentence', 'token'], default='token', help='length metric for bucketing results')
     args = parser.parse_args()
 
     records = list(load_jsonl(args.inpath))
@@ -199,7 +214,7 @@ def main():
                 elif r1c < r1:
                     worsened_cases.append({'id': rec.get('id'), 'r1': r1, 'r1c': r1c})
 
-            bucket = bucket_label(get_sentence_count(rec))
+            bucket = bucket_label(get_length_value(rec, args.bucket_by))
             bucket_acc[bucket]['count'] += 1
             bucket_acc[bucket]['support_rate'].append(support_rate)
             bucket_acc[bucket]['corrected_support_rate'].append(corrected_support_rate)
@@ -217,6 +232,7 @@ def main():
     else:
         summary['support_rate_samples'] = support_rates
     summary['avg_rouge'] = {k: avg(v) for k, v in rouge_acc.items()}
+    summary['length_bucket_metric'] = args.bucket_by
     summary['length_bucket_definition'] = [
         {'label': label, 'min_sentence_count': lower, 'max_sentence_count': upper}
         for lower, upper, label in LENGTH_BUCKETS

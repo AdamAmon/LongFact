@@ -27,7 +27,7 @@ _SUMMARIZER_CACHE: Dict[str, object] = {}
 
 
 class HFLocalSummarizer:
-    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False):
+    def __init__(self, model_name: str = DEFAULT_SUMMARIZER_MODEL, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
         if pipeline is None:
             raise ImportError('transformers is required for HFLocalSummarizer')
         self.max_length = max_length
@@ -35,6 +35,7 @@ class HFLocalSummarizer:
         self.last_error = None
         self.precision = precision or PREFERRED_PRECISION or 'auto'
         self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
+        self.gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
         # Try centralized helper pre-load to avoid duplicate generation_config defaults
         try:
             from utils.hf_helpers import load_model_and_tokenizer
@@ -42,10 +43,17 @@ class HFLocalSummarizer:
             load_model_and_tokenizer = None
         if load_model_and_tokenizer is not None:
             try:
-                model_obj, tokenizer_obj = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=load_in_8bit, torch_dtype=(_torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None))
+                model_obj, tokenizer_obj = load_model_and_tokenizer(
+                    model_name,
+                    model_kind='causal',
+                    load_in_8bit=load_in_8bit,
+                    torch_dtype=(_torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None),
+                    device=device,
+                    gpu_only=self.gpu_only,
+                )
                 if model_obj is not None and tokenizer_obj is not None:
                     # Use explicit model + tokenizer to construct pipeline
-                    self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj, truncation=True, trust_remote_code=True, device=device)
+                    self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj, truncation=True, trust_remote_code=True)
                     return
                 # if only tokenizer available, let later branches reuse it
                 if tokenizer_obj is not None:
@@ -72,7 +80,7 @@ class HFLocalSummarizer:
                 bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    device_map='auto',
+                    device_map={'': device} if self.gpu_only and device >= 0 else 'auto',
                     quantization_config=bnb_cfg,
                     trust_remote_code=True,
                 )
@@ -113,7 +121,7 @@ class HFLocalSummarizer:
                     except Exception:
                         pass
                     # load model with float16 dtype where supported
-                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', torch_dtype=_torch.float16, trust_remote_code=True)
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', torch_dtype=_torch.float16, trust_remote_code=True)
                     if hasattr(model, 'generation_config'):
                         try:
                             model.generation_config.max_length = None
@@ -140,15 +148,21 @@ class HFLocalSummarizer:
         # Fallback: explicitly pre-load model/tokenizer and pass to pipeline to avoid
         # pipeline-internal model creation which can leave generation_config defaults.
         try:
-            model_obj, tokenizer = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=False, torch_dtype=None)
+            model_obj, tokenizer = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=False, torch_dtype=None, device=device, gpu_only=self.gpu_only)
             if model_obj is not None and tokenizer is not None:
-                self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer, device=device, truncation=True, trust_remote_code=True)
+                self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer, truncation=True, trust_remote_code=True)
             elif tokenizer is not None:
+                if self.gpu_only and device >= 0:
+                    raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                 self.pipe = pipeline('text-generation', model=model_name, tokenizer=tokenizer, device=device, truncation=True, trust_remote_code=True)
             else:
+                if self.gpu_only and device >= 0:
+                    raise RuntimeError(f'GPU-only mode could not load model {model_name}')
                 self.pipe = pipeline('text-generation', model=model_name, device=device, truncation=True, trust_remote_code=True)
         except Exception:
-            # fallback: let pipeline decide
+            # fallback: let pipeline decide only when CPU/offload is allowed
+            if self.gpu_only and device >= 0:
+                raise
             self.pipe = pipeline('text-generation', model=model_name, device=device, truncation=True, trust_remote_code=True)
 
     def build_prompt(self, chunk: str, prompt: Optional[str] = None) -> str:
@@ -302,8 +316,9 @@ class FallbackSummarizer:
         return out
 
 
-def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False):
-    key = f'{model_name}::dev{device}::len{max_length}::8bit{load_in_8bit}::bs{batch_size}::prec{precision}::compile{torch_compile}'
+def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_length: int = 256, load_in_8bit: bool = False, batch_size: int = 1, precision: str = 'auto', torch_compile: bool = False, gpu_only: Optional[bool] = None):
+    effective_gpu_only = (device >= 0) if gpu_only is None else bool(gpu_only)
+    key = f'{model_name}::dev{device}::len{max_length}::8bit{load_in_8bit}::bs{batch_size}::prec{precision}::compile{torch_compile}::gpuonly{effective_gpu_only}'
     if model_name is None:
         return FallbackSummarizer()
 
@@ -311,7 +326,7 @@ def get_summarizer(model_name: Optional[str] = None, device: int = -1, max_lengt
         return _SUMMARIZER_CACHE[key]
 
     try:
-        summ = HFLocalSummarizer(model_name=model_name, device=device, max_length=max_length, load_in_8bit=load_in_8bit, batch_size=batch_size)
+        summ = HFLocalSummarizer(model_name=model_name, device=device, max_length=max_length, load_in_8bit=load_in_8bit, batch_size=batch_size, precision=precision, torch_compile=torch_compile, gpu_only=effective_gpu_only)
         _SUMMARIZER_CACHE[key] = summ
         return summ
     except Exception as e:
