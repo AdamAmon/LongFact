@@ -17,7 +17,7 @@ except Exception as e:
 from config import DEFAULT_DATA_DIR, DEFAULT_GOVREPORT_DATASET, ensure_local_dirs, FALLBACK_TO_SUMMARY
 
 
-def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir: Optional[str] = None, dataset_name: Optional[str] = None):
+def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir: Optional[str] = None, dataset_name: Optional[str] = None, start_index: int = 0):
     if load_dataset is None:
         raise ImportError('datasets is required to load GovReport')
     ensure_local_dirs()
@@ -67,7 +67,13 @@ def load_govreport(split: str = 'validation', sample_size: int = 500, cache_dir:
                 local_files_only=True,
             )
     if sample_size is not None and sample_size > 0:
-        ds = ds.select(range(min(sample_size, len(ds))))
+        # support optional start_index so callers can page through the dataset
+        start = max(0, int(start_index or 0))
+        end = min(len(ds), start + int(sample_size))
+        if start >= len(ds):
+            ds = ds.select([])
+        else:
+            ds = ds.select(range(start, end))
     records = []
     for i, ex in enumerate(ds):
         # summary fields (dataset can use different names)

@@ -45,6 +45,8 @@ LongFact 是一个面向 GovReport 长文摘要的本地可复现实验流水线
 pip install -r requirements.txt
 ```
 
+- 进度条（可选）: 若希望在 `run_experiment.py` 看到进度条，建议安装 `tqdm`（已加入 `requirements.txt`）。
+
 - 若使用 GPU，请确保已安装匹配版本的 `torch`、`accelerate`，并按需启用 `bitsandbytes`。
 
 ## 本地配置

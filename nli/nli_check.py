@@ -18,6 +18,12 @@ except Exception as e:
     print('nli_check: transformers import failed:', e)
     traceback.print_exc()
 
+# Prefer to use centralized HF helpers when available for safe loading and config cleanup.
+try:
+    from utils.hf_helpers import load_model_and_tokenizer
+except Exception:
+    load_model_and_tokenizer = None
+
 from config import DEFAULT_NLI_MODEL, PREFERRED_PRECISION, DEFAULT_TORCH_COMPILE
 
 
@@ -27,43 +33,74 @@ class NLIChecker:
             raise ImportError("transformers is required for NLIChecker")
         self.device = torch.device('cpu') if device == -1 else torch.device(f'cuda:{device}')
         self.precision = precision or PREFERRED_PRECISION or 'auto'
-        self.torch_compile = torch_compile or DEFAULT_TORCH_COMPILE
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Support 8-bit loading via bitsandbytes when requested
-        if load_in_8bit and BitsAndBytesConfig is not None:
+        # Try to use helper to pre-load model/tokenizer to avoid pipeline-internal defaults.
+        self.tokenizer = None
+        self.model = None
+        if load_model_and_tokenizer is not None:
             try:
-                # device_map='auto' will place parameters on GPU where possible
-                bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
-                self.model = AutoModelForSequenceClassification.from_pretrained(
-                    model_name,
-                    device_map='auto',
-                    quantization_config=bnb_cfg,
-                    trust_remote_code=True,
-                )
-            except Exception as e:
-                print(f'nli_check: 8bit load failed for {model_name}:', e)
-                traceback.print_exc()
-                # fallback to normal loading
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
-        else:
-            # If fp16 requested and GPU device available, try loading with float16 dtype
-            try:
-                if (self.precision in ('fp16', 'half')) and device >= 0:
-                    try:
-                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', torch_dtype=torch.float16)
-                        if self.torch_compile and hasattr(torch, 'compile'):
-                            try:
-                                self.model = torch.compile(self.model)
-                            except Exception:
-                                pass
-                    except Exception:
-                        # fallback to normal
-                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
-                else:
-                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+                # Sequence classification model
+                model_obj, tok = load_model_and_tokenizer(model_name, model_kind='seq_class', load_in_8bit=load_in_8bit, torch_dtype=(torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None))
+                # helper may return model/tokenizer or None; use what's available
+                if tok is not None:
+                    self.tokenizer = tok
+                if model_obj is not None:
+                    self.model = model_obj.to(self.device) if hasattr(model_obj, 'to') else model_obj
             except Exception:
-                # fallback
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+                self.tokenizer = None
+                self.model = None
+
+        # If helper did not supply tokenizer/model, fall back to module-level loading (keeps test monkeypatch compatibility)
+        if self.tokenizer is None and AutoTokenizer is not None:
+            try:
+                try:
+                    self.tokenizer = AutoTokenizer.from_pretrained(model_name, clean_up_tokenization_spaces=False)
+                except TypeError:
+                    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            except Exception:
+                self.tokenizer = None
+
+        if self.model is None:
+            # Support 8-bit loading via bitsandbytes when requested and available
+            if load_in_8bit and BitsAndBytesConfig is not None and AutoModelForSequenceClassification is not None:
+                try:
+                    bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', quantization_config=bnb_cfg, trust_remote_code=True)
+                except Exception:
+                    self.model = None
+
+            if self.model is None:
+                # Try fp16 path or normal loading
+                try:
+                    if (self.precision in ('fp16', 'half')) and device >= 0 and AutoModelForSequenceClassification is not None:
+                        try:
+                            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map='auto', torch_dtype=torch.float16)
+                            if self.torch_compile and hasattr(torch, 'compile'):
+                                try:
+                                    self.model = torch.compile(self.model)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            self.model = None
+                    if self.model is None and AutoModelForSequenceClassification is not None:
+                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+                except Exception:
+                    # final fallback attempt
+                    try:
+                        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
+                    except Exception:
+                        self.model = None
+
+        # Avoid pipeline passing both a generation_config object and runtime args.
+        if hasattr(self, 'model') and hasattr(self.model, 'generation_config'):
+            try:
+                self.model.generation_config.max_length = None
+                for fld in ('temperature', 'top_p', 'top_k'):
+                    try:
+                        setattr(self.model.generation_config, fld, None)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         # label mapping provided by model config, e.g. {0: 'CONTRADICTION', 1: 'NEUTRAL', 2: 'ENTAILMENT'}
         self.id2label = {int(k): v for k, v in self.model.config.id2label.items()}

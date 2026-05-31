@@ -7,3 +7,4 @@ datasets
 accelerate
 rouge-score
 rank_bm25
+tqdm>=4.64.0

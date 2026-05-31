@@ -3,6 +3,7 @@
 用于快速验证管线是否可跑通（小样本）。"""
 import argparse
 import json
+import os
 from config import (
     DEFAULT_CORRECTOR_MODEL,
     DEFAULT_DATA_DIR,
@@ -41,8 +42,9 @@ def run_sample(
     summary_batch_size: int = 1,
     precision: str = None,
     torch_compile: bool = None,
+    start_offset: int = 0,
 ):
-    records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR))
+    records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR), start_index=start_offset)
     results = []
 
     effective_precision = precision if precision is not None else PREFERRED_PRECISION
@@ -66,7 +68,16 @@ def run_sample(
     )
     retr = Retriever(model_name=DEFAULT_RETRIEVER_MODEL, device=device)
 
-    for rec in records:
+    # try to use tqdm for a progress bar if available
+    try:
+        from tqdm import tqdm
+        # put outer experiment progress on position 1 so model weight loading bars (position 0)
+        # remain visible separately and do not overwrite our sample-level progress
+        iterator = tqdm(records, desc=f'processing offset={start_offset}', unit='sample', position=1, leave=True)
+    except Exception:
+        iterator = records
+
+    for rec in iterator:
         # skip samples that were flagged as missing document (unless fallback enabled)
         sample_error = None
         sample_last_error = None
@@ -241,26 +252,62 @@ def main():
     parser.add_argument('--summary_max_new_tokens', type=int, default=256, help='每个 chunk 摘要生成的最大 token 数')
     parser.add_argument('--summary_batch_size', type=int, default=1, help='摘要阶段 pipeline 批大小（GPU 推荐 > 1）')
     parser.add_argument('--dataset_cache_dir', type=str, default=str(DEFAULT_DATA_DIR))
+    parser.add_argument('--start', type=int, default=0, help='开始偏移（用于分批处理）')
+    parser.add_argument('--step', type=int, default=0, help='分批大小；>0 时按 step 分批（例如 50）')
     parser.add_argument('--out', type=str, default='experiment_results.jsonl')
     args = parser.parse_args()
+    total_written = 0
+    # If step > 0, run in batches from start..start+n in steps of step
+    if args.step and args.step > 0:
+        # if starting a fresh multi-batch run from 0, remove existing out file to avoid duplicate appends
+        if args.start == 0 and os.path.exists(args.out):
+            try:
+                os.remove(args.out)
+            except Exception:
+                pass
 
-    res = run_sample(
-        sample_count=args.n,
-        use_model=args.use_model,
-        model_name=args.model_name,
-        device=args.device,
-        dataset_cache_dir=args.dataset_cache_dir,
-        load_in_8bit=args.load_in_8bit,
-        summary_max_new_tokens=args.summary_max_new_tokens,
-        summary_batch_size=args.summary_batch_size,
-        precision=args.precision,
-        torch_compile=args.torch_compile,
-    )
-    with open(args.out, 'w', encoding='utf-8') as f:
-        for r in res:
-            f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        end_index = args.start + args.n
+        for batch_start in range(args.start, end_index, args.step):
+            batch_count = min(args.step, end_index - batch_start)
+            print(f'Running batch start={batch_start} count={batch_count}')
+            res = run_sample(
+                sample_count=batch_count,
+                use_model=args.use_model,
+                model_name=args.model_name,
+                device=args.device,
+                dataset_cache_dir=args.dataset_cache_dir,
+                load_in_8bit=args.load_in_8bit,
+                summary_max_new_tokens=args.summary_max_new_tokens,
+                summary_batch_size=args.summary_batch_size,
+                precision=args.precision,
+                torch_compile=args.torch_compile,
+                start_offset=batch_start,
+            )
+            mode = 'a' if os.path.exists(args.out) else 'w'
+            with open(args.out, mode, encoding='utf-8') as f:
+                for r in res:
+                    f.write(json.dumps(r, ensure_ascii=False) + '\n')
+            total_written += len(res)
+        print(f'Wrote {total_written} results to {args.out}')
+    else:
+        res = run_sample(
+            sample_count=args.n,
+            use_model=args.use_model,
+            model_name=args.model_name,
+            device=args.device,
+            dataset_cache_dir=args.dataset_cache_dir,
+            load_in_8bit=args.load_in_8bit,
+            summary_max_new_tokens=args.summary_max_new_tokens,
+            summary_batch_size=args.summary_batch_size,
+            precision=args.precision,
+            torch_compile=args.torch_compile,
+            start_offset=args.start,
+        )
+        with open(args.out, 'w', encoding='utf-8') as f:
+            for r in res:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
 
-    print(f'Wrote {len(res)} results to {args.out}')
+        print(f'Wrote {len(res)} results to {args.out}')
 
 
 if __name__ == '__main__':

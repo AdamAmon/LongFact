@@ -72,7 +72,12 @@ def run_pipeline(
         )
         # debug: log chunk counts
         print(f'[run_pipeline] num_chunks={len(chunks)}')
-        local_summaries = summarizer.summarize_chunks(chunks)
+        # enable chunk-level progress bar when tqdm is available
+        try:
+            from tqdm import tqdm  # noqa: F401
+            local_summaries = summarizer.summarize_chunks(chunks, show_progress=True)
+        except Exception:
+            local_summaries = summarizer.summarize_chunks(chunks)
         print(f'[run_pipeline] local_summaries_count={len(local_summaries)}')
         result['local_summaries'] = local_summaries
         fused = fuse_summaries(local_summaries)

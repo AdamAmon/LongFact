@@ -6,7 +6,7 @@ import re
 from typing import List, Optional
 
 try:
-    from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
+    from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, GenerationConfig
 except Exception as e:
     pipeline = None
     AutoTokenizer = None
@@ -35,7 +35,7 @@ _CORRECTOR_CACHE = {}
 
 
 class Corrector:
-    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 32, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
+    def __init__(self, model_name: Optional[str] = DEFAULT_CORRECTOR_MODEL, device: int = -1, max_length: int = 128, load_in_8bit: bool = False, precision: str = 'auto', torch_compile: bool = False):
         self.model_name = model_name
         self.device = device
         self.max_length = max_length
@@ -49,17 +49,53 @@ class Corrector:
             self.pipe = cached.get('pipe')
             return
         if model_name and pipeline is not None:
+            # Try centralized helper pre-load first to avoid pipeline-internal defaults
+            try:
+                from utils.hf_helpers import load_model_and_tokenizer
+            except Exception:
+                load_model_and_tokenizer = None
+            if load_model_and_tokenizer is not None:
+                try:
+                    model_obj, tokenizer_obj = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=load_in_8bit, torch_dtype=(_torch.float16 if (self.precision in ('fp16', 'half') and device >= 0) else None))
+                    if model_obj is not None and tokenizer_obj is not None:
+                        try:
+                            if self.torch_compile and hasattr(_torch, 'compile'):
+                                try:
+                                    model_obj = _torch.compile(model_obj)
+                                except Exception:
+                                    pass
+                            self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj, device=device)
+                            _CORRECTOR_CACHE[key] = {'pipe': self.pipe}
+                            return
+                        except Exception:
+                            # fallthrough to existing loading logic
+                            pass
+                except Exception:
+                    pass
             # Try to load an 8-bit model object when requested.
             # Support both seq2seq and causal LMs so the same corrector can be
             # used with different default models.
             if load_in_8bit and AutoTokenizer is not None and BitsAndBytesConfig is not None:
                 try:
-                    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                    try:
+                        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
+                    except TypeError:
+                        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
                     quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
                     # Qwen-style corrector models are causal LMs, so prefer the causal path first.
                     if AutoModelForCausalLM is not None:
                         try:
                             model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                            if hasattr(model, 'generation_config'):
+                                try:
+                                    model.generation_config.max_length = None
+                                    for fld in ('temperature', 'top_p', 'top_k'):
+                                        try:
+                                            setattr(model.generation_config, fld, None)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
                             self.pipe = pipeline('text-generation', model=model, tokenizer=tokenizer)
                         except Exception as e:
                             import traceback
@@ -71,6 +107,16 @@ class Corrector:
                     if self.pipe is None and AutoModelForSeq2SeqLM is not None:
                         try:
                             model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map='auto', quantization_config=quant_cfg)
+                            if hasattr(model, 'generation_config'):
+                                try:
+                                    model.generation_config.max_length = None
+                                    for fld in ('temperature', 'top_p', 'top_k'):
+                                        try:
+                                            setattr(model.generation_config, fld, None)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
                             self.pipe = pipeline('text2text-generation', model=model, tokenizer=tokenizer)
                         except Exception as e:
                             import traceback
@@ -97,9 +143,22 @@ class Corrector:
                 try:
                     if (self.precision in ('fp16', 'half')) and AutoTokenizer is not None and device >= 0:
                         try:
-                            tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                            try:
+                                tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
+                            except TypeError:
+                                tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
                             if AutoModelForCausalLM is not None:
                                 model = AutoModelForCausalLM.from_pretrained(model_name, device_map='auto', torch_dtype=_torch.float16)
+                                if hasattr(model, 'generation_config'):
+                                    try:
+                                        model.generation_config.max_length = None
+                                        for fld in ('temperature', 'top_p', 'top_k'):
+                                            try:
+                                                setattr(model.generation_config, fld, None)
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
                                 if self.torch_compile and hasattr(_torch, 'compile'):
                                     try:
                                         model = _torch.compile(model)
@@ -115,7 +174,19 @@ class Corrector:
                     pass
 
                 try:
-                    self.pipe = pipeline('text-generation', model=model_name, device=device)
+                    # prefer to load tokenizer explicitly so we can set clean_up_tokenization_spaces
+                    if AutoTokenizer is not None:
+                        try:
+                            tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
+                        except TypeError:
+                            tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                        try:
+                            tokenizer.clean_up_tokenization_spaces = False
+                        except Exception:
+                            pass
+                        self.pipe = pipeline('text-generation', model=model_name, tokenizer=tokenizer, device=device)
+                    else:
+                        self.pipe = pipeline('text-generation', model=model_name, device=device)
                 except Exception as e:
                     import traceback
                     tb = traceback.format_exc()
@@ -123,7 +194,18 @@ class Corrector:
                     print(tb)
                     self.last_error = tb
                     try:
-                        self.pipe = pipeline('text2text-generation', model=model_name, device=device)
+                        if AutoTokenizer is not None:
+                            try:
+                                tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
+                            except TypeError:
+                                tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                            try:
+                                tokenizer.clean_up_tokenization_spaces = False
+                            except Exception:
+                                pass
+                            self.pipe = pipeline('text2text-generation', model=model_name, tokenizer=tokenizer, device=device)
+                        else:
+                            self.pipe = pipeline('text2text-generation', model=model_name, device=device)
                     except Exception as e2:
                         tb2 = traceback.format_exc()
                         print(f'corrector: text2text pipeline load also failed for {model_name}:', e2)
@@ -173,12 +255,13 @@ class Corrector:
             return sentence
         try:
             try:
-                out = self.pipe(
-                    prompt,
-                    truncation=True,
-                    max_new_tokens=self.max_length,
-                    return_full_text=False,
-                )
+                gen_cfg = None
+                if 'GenerationConfig' in globals() and GenerationConfig is not None:
+                    gen_cfg = GenerationConfig(max_new_tokens=self.max_length, do_sample=False)
+                if gen_cfg is not None:
+                    out = self.pipe(prompt, truncation=True, return_full_text=False, generation_config=gen_cfg)
+                else:
+                    out = self.pipe(prompt, truncation=True, max_new_tokens=self.max_length, return_full_text=False)
             except TypeError:
                 # Some test doubles or minimal pipeline fakes accept only the prompt
                 out = self.pipe(prompt)
@@ -217,13 +300,13 @@ class Corrector:
             p_batch = prompts[i:i + max(1, int(batch_size))]
             s_batch = sentences[i:i + max(1, int(batch_size))]
             try:
-                out = self.pipe(
-                    p_batch,
-                    truncation=True,
-                    max_new_tokens=self.max_length,
-                    return_full_text=False,
-                    batch_size=max(1, int(batch_size)),
-                )
+                gen_cfg = None
+                if 'GenerationConfig' in globals() and GenerationConfig is not None:
+                    gen_cfg = GenerationConfig(max_new_tokens=self.max_length, do_sample=False)
+                if gen_cfg is not None:
+                    out = self.pipe(p_batch, truncation=True, return_full_text=False, generation_config=gen_cfg, batch_size=max(1, int(batch_size)))
+                else:
+                    out = self.pipe(p_batch, truncation=True, max_new_tokens=self.max_length, return_full_text=False, batch_size=max(1, int(batch_size)))
             except TypeError:
                 # fallback for simple callable mocks
                 out = [self.pipe(p) for p in p_batch]

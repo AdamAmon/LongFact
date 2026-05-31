@@ -2,8 +2,12 @@ import os
 import time
 import sys
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
+try:
+    from utils.hf_helpers import load_model_and_tokenizer
+except Exception:
+    load_model_and_tokenizer = None
 
 
 def main():
@@ -20,20 +24,39 @@ def main():
         print("No CUDA device visible in this Python process. 8-bit requires GPU — aborting test.")
         sys.exit(2)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-
+    tokenizer = None
+    model = None
     t0 = time.time()
-    bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map='auto',
-            quantization_config=bnb_cfg,
-            trust_remote_code=True
-        )
-    except Exception as e:
-        print("Failed to load model with BitsAndBytesConfig:", e)
-        raise
+    # Try helper loader first (safe pre-load with cleanup)
+    if load_model_and_tokenizer is not None:
+        try:
+            model, tokenizer = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=True, torch_dtype=None)
+        except Exception:
+            model = None
+
+    if tokenizer is None:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, clean_up_tokenization_spaces=False)
+        except TypeError:
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+
+    if model is None:
+        bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map='auto',
+                quantization_config=bnb_cfg,
+                trust_remote_code=True
+            )
+            if hasattr(model, 'generation_config'):
+                try:
+                    model.generation_config.max_length = None
+                except Exception:
+                    pass
+        except Exception as e:
+            print("Failed to load model with BitsAndBytesConfig:", e)
+            raise
     t1 = time.time()
 
     print(f"Loaded model in {t1-t0:.1f}s")
@@ -42,13 +65,13 @@ def main():
     inputs = tokenizer(prompt, return_tensors='pt')
     input_ids = inputs.input_ids.to(device)
 
-    gen_cfg = GenerationConfig(max_new_tokens=128, do_sample=False)
+    max_new_tokens = 128
 
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
     t2 = time.time()
-    out = model.generate(input_ids=input_ids, generation_config=gen_cfg)
+    out = model.generate(input_ids=input_ids, max_new_tokens=max_new_tokens)
     t3 = time.time()
 
     if torch.cuda.is_available():
