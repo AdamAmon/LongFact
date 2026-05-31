@@ -37,6 +37,10 @@ runs/
 *.faiss
 *.index
 
+# Embedding cache files (project stores .npz / .index under data/emb_cache)
+data/emb_cache/
+*.npz
+
 # Hugging Face / transformer caches
 .cache/huggingface
 .cache/transformers
@@ -73,6 +77,17 @@ Thumbs.db
 # caches
 .cache/
 __pycache__/
+
+# PyTorch compiled extension cache
+.cache/torch_extensions/
+
+# accelerate state (local multi-process run state)
+accelerate_state.json
+
+# model export and local DB artifacts
+*.onnx
+*.sqlite
+*.db
 
 # Pytest / testing
 .pytest_cache/

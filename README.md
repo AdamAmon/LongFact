@@ -92,7 +92,7 @@ python scripts.analyze_results.py --in results/experiment.jsonl --out results/su
 
 ## 进阶：分阶段耗时（可选）
 
-如果你需要精确的阶段耗时（摘要、检索、NLI、纠错），我可以再加入每阶段计时日志（已有进度条），以帮助精确定位瓶颈。需要我实现吗？
+如果你需要精确的分阶段耗时（摘要、检索、NLI、纠错），仓库中已有位置适合加入计时：可在 `run_experiment.py` 的 `run_sample` 中对每个样本记录阶段起止时间并写入结果 JSONL 的 `timing` 字段。我可以为你实现此功能并运行小样本验证，或把实现提交到分支。
 
 ## 常用调试与排错命令
 
@@ -178,4 +178,50 @@ python scripts/merge_results.py --out results/merged_5hosts.jsonl results/host*_
 - 返回合并后的总条数
 
 脚本位于：`scripts/merge_results.py`。
+
+## 项目结构（快速导航）
+
+- **入口与实验**: `run_experiment.py` — 端到端实验运行器（采样→摘要→检索→NLI→纠错→评估）。
+- **摘要**: `summarize/run_summarize.py`, `summarize/model_summarizer.py` — 分块、局部摘要与融合，支持 HF 模型与回退实现。
+- **检索**: `retrieval/retriever.py` — sentence-transformers + FAISS（可选 BM25）封装与缓存。
+- **NLI**: `nli/nli_check.py` — 句对 NLI 判定、批量/分桶处理与多证据聚合。
+- **纠错**: `correction/corrector.py` — 基于证据的局部改写与批量纠错接口。
+- **数据**: `data/load_govreport.py` — GovReport 数据集加载与采样工具；数据缓存位于 `data/cache/`。
+- **评估**: `eval/evaluate.py` — ROUGE 与句子级支持率计算、结果详情生成。
+- **工具**: `utils/hf_helpers.py` — 统一的 Hugging Face 模型/Tokenizer 加载与清理逻辑。
+- **脚本**: `scripts/` — 结果合并、分析、benchmark 等实用脚本。
+- **测试**: `tests/` — 单元与集成测试。
+
+## 运行与验证（快捷命令）
+
+- 端到端小样本（fp16 优先）:
+
+```powershell
+python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --summary_batch_size 8 --summary_max_new_tokens 64 --out results/test_n5_fp16.jsonl
+```
+
+- 单样本快速调试（直接打印 pipeline 输出）:
+
+```powershell
+python -c "from summarize.run_summarize import run_pipeline; import json; doc='长文内容'; print(json.dumps(run_pipeline(doc, use_model=True, model_name=None, device=0), ensure_ascii=False, indent=2))"
+```
+
+- 运行测试（建议在虚拟环境中）:
+
+```powershell
+pip install -r requirements.txt
+pytest -q
+```
+
+## 平台注意事项
+
+- `bitsandbytes` 在 `requirements.txt` 中对 Windows 平台被条件排除（见文件头）。在 Windows 上若要使用 8-bit，请参考 bitsandbytes 官方安装说明并在虚拟环境中手动安装兼容版本。默认在 Windows 环境下优先使用 `fp16` 或 CPU 回退。 
+
+## 我可以帮你做的事（可选）
+
+- 实现并运行“每样本分阶段耗时统计”，把 `timing` 信息写入输出 JSONL；
+- 在 `README.md` 中添加一个更详尽的运行示例与调优指南（基于你的硬件）；
+- 运行一次端到端小样本并把结果发给你以便核验。 
+
+如需我直接修改 README 并/或实现分阶段计时，请回复你希望优先的项。
 
