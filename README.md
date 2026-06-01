@@ -76,6 +76,10 @@ pip install tqdm
 
 ```powershell
 python scripts.analyze_results.py --in results/experiment.jsonl --out results/summary.json --cases-out results/cases.json --csv-out results/length_buckets.csv --case-count 10 --bucket-by token
+
+python scripts/analyze_results.py --in results/full_n500.jsonl --out results/analysis_summary.json --csv-out results/bucket_metrics.csv --cases-out results/correction_cases.json --case-count 10 --bucket-by token
+
+python scripts/generate_results_table.py --in results/full_n500.jsonl --out-csv results/per_sample_results.csv --out-summary results/summary_results.json --examples 10
 ```
 
 默认分桶策略为 token，也可用 `--bucket-by sentence` 切换。
