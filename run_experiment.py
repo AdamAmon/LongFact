@@ -18,6 +18,7 @@ from data.load_govreport import load_govreport
 from config import FALLBACK_TO_SUMMARY
 from summarize.run_summarize import run_pipeline
 from retrieval.retriever import Retriever
+from retrieval.advanced_retriever import AdvancedRetriever
 from nli.nli_check import NLIChecker
 from correction.corrector import Corrector
 from eval.evaluate import compute_rouge, compute_support_rate, sentence_split
@@ -45,6 +46,7 @@ def run_sample(
     torch_compile: bool = None,
     start_offset: int = 0,
     top_k: int = 3,
+    retrieval_strategy: str = 'baseline',
 ):
     records = load_govreport(split='validation', sample_size=sample_count, cache_dir=dataset_cache_dir or str(DEFAULT_DATA_DIR), start_index=start_offset)
     results = []
@@ -68,7 +70,11 @@ def run_sample(
         precision=effective_precision,
         torch_compile=effective_compile,
     )
-    retr = Retriever(model_name=DEFAULT_RETRIEVER_MODEL, device=device)
+    if retrieval_strategy == 'dce':
+        print('[run_experiment] Using AdvancedRetriever (DCE strategy)')
+        retr = AdvancedRetriever(model_name=DEFAULT_RETRIEVER_MODEL, use_bm25=True, device=device)
+    else:
+        retr = Retriever(model_name=DEFAULT_RETRIEVER_MODEL, device=device)
 
     # try to use tqdm for a progress bar if available
     try:
@@ -313,6 +319,7 @@ def main():
     parser.add_argument('--start', type=int, default=0, help='开始偏移（用于分批处理）')
     parser.add_argument('--step', type=int, default=0, help='分批大小；>0 时按 step 分批（例如 50）')
     parser.add_argument('--top_k', type=int, default=3, help='检索时每句证据的 top_k 大小，影响 NLI 调用次数')
+    parser.add_argument('--retrieval_strategy', type=str, default='baseline', choices=['baseline', 'dce'], help='证据检索策略：baseline=标准检索, dce=双通道证据检索+重排序')
     parser.add_argument('--out', type=str, default='experiment_results.jsonl')
     args = parser.parse_args()
     total_written = 0
@@ -342,6 +349,7 @@ def main():
                 torch_compile=args.torch_compile,
                 start_offset=batch_start,
                 top_k=args.top_k,
+                retrieval_strategy=args.retrieval_strategy,
             )
             mode = 'a' if os.path.exists(args.out) else 'w'
             with open(args.out, mode, encoding='utf-8') as f:
@@ -363,6 +371,7 @@ def main():
             torch_compile=args.torch_compile,
             start_offset=args.start,
             top_k=args.top_k,
+            retrieval_strategy=args.retrieval_strategy,
         )
         with open(args.out, 'w', encoding='utf-8') as f:
             for r in res:

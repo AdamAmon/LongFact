@@ -1,9 +1,13 @@
 Explanation: Comprehensive README update with commands, progress and performance guidance.
 # LongFact — 长文摘要事实一致性评测与纠错（使用说明）
 
-LongFact 是一套本地流水线：数据采样 → 分块摘要 → 证据检索 → 句子级 NLI 判定 → 局部纠错 → 评估（ROUGE / 支持率）。
+LongFact 是一套面向 NJUniversity 大作业的本地实验流水线，完整覆盖三个任务：
 
-本文档更新包含：GPU/8-bit/FP16 的运行建议、实用命令、实时进度显示说明，以及分析脚本的长度分桶与案例导出用法。
+- **任务 3.1（基线）**：数据采样 → 分块摘要 → 证据检索 → 句子级 NLI 判定 → 局部纠错 → 评估（ROUGE / 支持率）
+- **任务 3.2（分析）**：长度分桶分析 + 纠错案例导出
+- **任务 3.3（进阶）**：DCE 双通道证据检索（检测方向原创改进）
+
+本文档涵盖：GPU/8-bit/FP16 运行建议、实用命令、DCE 进阶检索使用、实时进度、分析脚本与案例导出。
 
 ## 推荐硬件与软件（本仓库测试环境）
 
@@ -45,9 +49,48 @@ python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --summary
 
 说明：`--summary_batch_size` 越大减少 GPU 上小批次切换开销，但显存占用上升；`summary_max_new_tokens` 控制每个 chunk 的生成长度，会显著影响耗时。
 
+## 进阶检索策略：DCE（双通道证据检索）
+
+针对任务 3.3（检测方向），实现了 **DCE（Dual-Channel Evidence Retrieval with Entailment-Guided Re-Ranking）** 原创进阶检索器，位于 `retrieval/advanced_retriever.py`。
+
+### DCE 核心机制
+
+| 机制 | 说明 |
+|------|------|
+| 双通道检索融合 | 语义 embedding（Sentence-BERT + FAISS）+ 关键词 BM25，合并去重 |
+| 轻量级重排序 | n-gram 重叠 + 实体命中 + 位置连贯性，三项启发式打分（零额外模型开销） |
+| 自适应 Top-K | 短句 k=3、中等句 k=5、长句 k=7，减少无效 NLI 调用 |
+| 条件证据扩展 | NLI 低置信度时以 top-3 锚点扩展最近邻段落 |
+
+### 使用方式
+
+通过 `--retrieval_strategy` 参数切换：
+
+```powershell
+# 基线（原有标准检索）
+python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --out results/baseline_n5.jsonl
+
+# DCE 进阶检索
+python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --retrieval_strategy dce --out results/dce_n5.jsonl
+```
+
+### 对比实验
+
+```powershell
+# 运行基线
+python run_experiment.py --n 100 --use_model --device 0 --precision fp16 --summary_batch_size 8 --summary_max_new_tokens 64 --out results/baseline_n100.jsonl
+
+# 运行 DCE
+python run_experiment.py --n 100 --use_model --device 0 --precision fp16 --summary_batch_size 8 --summary_max_new_tokens 64 --retrieval_strategy dce --out results/dce_n100.jsonl
+
+# 对比分析
+python scripts/analyze_results.py --in results/baseline_n100.jsonl --out results/baseline_summary.json
+python scripts/analyze_results.py --in results/dce_n100.jsonl --out results/dce_summary.json
+```
+
 ## 实时进度与可视化
 
-本仓库现在在这些阶段都支持实时进度显示（基于 `tqdm`）：
+本仓库在这些阶段都支持实时进度显示（基于 `tqdm`）：
 
 - 模型加载（transformers 的权重加载进度）
 - 分块摘要（chunk -> batch）
@@ -122,15 +165,20 @@ python run_experiment.py --n 1 --start 4 --use_model --model_name Qwen/Qwen2.5-1
 python run_experiment.py --n 1 --start 4 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --load_in_8bit --summary_batch_size 8 --summary_max_new_tokens 64 --out results/test_item5_8bit.jsonl
 ```
 
-## 已实现的重要改动（摘录）
+## 已实现的重要改动
 
+- `retrieval/advanced_retriever.py`（新增）：DCE 双通道证据检索器，含自适应 Top-K、轻量级重排序、条件证据扩展。
+- `run_experiment.py`：新增 `--retrieval_strategy baseline|dce` 参数，支持策略切换对比实验。
 - `eval/evaluate.py`：句子级 `compute_support_rate()` 增加 `tqdm` 可视进度（`show_progress`）。
 - `correction/corrector.py`：`correct_batch()` 增加 `tqdm` 可视进度与 `show_progress` 参数。
-- `run_experiment.py`：在原始 NLI / 批量纠错 / 纠错后 NLI 三处启用进度显示。
+- `run_experiment.py`：在原始 NLI / 批量纠错 / 纠错后 NLI 三处启用进度显示，支持分阶段耗时记录。
 
-## 结语
+## 当前状态
 
-如果你希望我把“分阶段耗时统计”加进 `run_experiment.py`（会打印每个样本的摘要时长、检索时长、NLI 时长、纠错时长与总时长），我可以现在实现并运行一次小样本验证，或直接把实现提交到分支。要我继续吗？
+- ✅ 任务 3.1（基线）：完整实现并通过测试
+- ✅ 任务 3.2（分析）：长度分桶 + 案例导出（已有 n=500 实验结果）
+- ✅ 任务 3.3（进阶-检测方向）：DCE 双通道证据检索已实现，16 项测试全部通过
+- ✅ 分阶段耗时统计：已在 `timing` 字段中记录每个样本的各阶段耗时
 
 ## 机房多机运行建议（5 台 RTX 3070，每台处理 100 条样本）
 
@@ -185,16 +233,16 @@ python scripts/merge_results.py --out results/merged_5hosts.jsonl results/host*_
 
 ## 项目结构（快速导航）
 
-- **入口与实验**: `run_experiment.py` — 端到端实验运行器（采样→摘要→检索→NLI→纠错→评估）。
+- **入口与实验**: `run_experiment.py` — 端到端实验运行器（采样→摘要→检索→NLI→纠错→评估），支持 `--retrieval_strategy baseline|dce`。
 - **摘要**: `summarize/run_summarize.py`, `summarize/model_summarizer.py` — 分块、局部摘要与融合，支持 HF 模型与回退实现。
-- **检索**: `retrieval/retriever.py` — sentence-transformers + FAISS（可选 BM25）封装与缓存。
+- **检索**: `retrieval/retriever.py` — sentence-transformers + FAISS（可选 BM25）封装与缓存；`retrieval/advanced_retriever.py` — DCE 双通道进阶检索器。
 - **NLI**: `nli/nli_check.py` — 句对 NLI 判定、批量/分桶处理与多证据聚合。
 - **纠错**: `correction/corrector.py` — 基于证据的局部改写与批量纠错接口。
 - **数据**: `data/load_govreport.py` — GovReport 数据集加载与采样工具；数据缓存位于 `data/cache/`。
 - **评估**: `eval/evaluate.py` — ROUGE 与句子级支持率计算、结果详情生成。
 - **工具**: `utils/hf_helpers.py` — 统一的 Hugging Face 模型/Tokenizer 加载与清理逻辑。
-- **脚本**: `scripts/` — 结果合并、分析、benchmark 等实用脚本。
-- **测试**: `tests/` — 单元与集成测试。
+- **脚本**: `scripts/` — 结果合并、分析、benchmark、案例图表等实用脚本。
+- **测试**: `tests/` — 单元与集成测试（16 项全部通过）。
 
 ## 运行与验证（快捷命令）
 
@@ -221,11 +269,21 @@ pytest -q
 
 - `bitsandbytes` 在 `requirements.txt` 中对 Windows 平台被条件排除（见文件头）。在 Windows 上若要使用 8-bit，请参考 bitsandbytes 官方安装说明并在虚拟环境中手动安装兼容版本。默认在 Windows 环境下优先使用 `fp16` 或 CPU 回退。 
 
-## 我可以帮你做的事（可选）
+## CLI 参数速查
 
-- 实现并运行“每样本分阶段耗时统计”，把 `timing` 信息写入输出 JSONL；
-- 在 `README.md` 中添加一个更详尽的运行示例与调优指南（基于你的硬件）；
-- 运行一次端到端小样本并把结果发给你以便核验。 
-
-如需我直接修改 README 并/或实现分阶段计时，请回复你希望优先的项。
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--n` | int | 5 | 处理样本数 |
+| `--start` | int | 0 | 数据集起始偏移 |
+| `--use_model` | flag | False | 启用 HF 模型生成摘要 |
+| `--model_name` | str | Qwen/Qwen2.5-1.5B-Instruct | 摘要/纠错模型 |
+| `--device` | int | -1 | GPU 设备 ID（-1=CPU） |
+| `--precision` | str | auto | 精度：auto/fp32/fp16/8bit |
+| `--load_in_8bit` | flag | False | bitsandbytes 8-bit 加载 |
+| `--summary_batch_size` | int | 4 | 摘要批次大小 |
+| `--summary_max_new_tokens` | int | 256 | 每 chunk 最大生成 token |
+| `--top_k` | int | 3 | 检索证据数量 |
+| `--retrieval_strategy` | str | baseline | 检索策略：baseline/dce |
+| `--step` | int | 0 | 分批大小（>0 时分批运行） |
+| `--out` | str | experiment_results.jsonl | 输出文件路径 |
 
