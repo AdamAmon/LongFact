@@ -75,16 +75,18 @@ class NLIChecker:
             if load_in_8bit and BitsAndBytesConfig is not None and AutoModelForSequenceClassification is not None:
                 try:
                     bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
-                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', quantization_config=bnb_cfg, trust_remote_code=True)
+                    self.model = AutoModelForSequenceClassification.from_pretrained(model_name, quantization_config=bnb_cfg, trust_remote_code=True).to(self.device)
                 except Exception:
                     self.model = None
 
             if self.model is None:
-                # Try fp16 path or normal loading
+                # Try fp16 path or normal loading; use .to(device) instead of
+                # device_map because sequence-classification models like
+                # bart-large-mnli do not reliably support accelerate device_map.
                 try:
                     if (self.precision in ('fp16', 'half')) and device >= 0 and AutoModelForSequenceClassification is not None:
                         try:
-                            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', torch_dtype=torch.float16)
+                            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=torch.float16).to(self.device)
                             if self.torch_compile and hasattr(torch, 'compile'):
                                 try:
                                     self.model = torch.compile(self.model)

@@ -95,19 +95,26 @@ def load_model_and_tokenizer(
             elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
                 model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, quantization_config=bnb, trust_remote_code=trust_remote_code)
+                # seq_class models may not support device_map; load without it
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, quantization_config=bnb, trust_remote_code=trust_remote_code)
+                if model is not None and gpu_only and device is not None and device >= 0:
+                    model = model.to(torch.device(f'cuda:{device}'))
         except Exception:
             model = None
 
-    # Try fp16
+    # Try fp16 (skip device_map for seq_class models — they don't need sharding)
     if model is None and torch_dtype is not None:
         try:
-            if model_kind == 'causal' and AutoModelForCausalLM is not None:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
-            elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+            if model_kind in ('causal', 'seq2seq') and (AutoModelForCausalLM is not None or AutoModelForSeq2SeqLM is not None):
+                if model_kind == 'causal' and AutoModelForCausalLM is not None:
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
+                if model is not None and gpu_only and device is not None and device >= 0:
+                    import torch as _torch_local
+                    model = model.to(_torch_local.device(f'cuda:{device}'))
         except Exception:
             model = None
 
@@ -119,7 +126,9 @@ def load_model_and_tokenizer(
             elif model_kind == 'seq2seq' and AutoModelForSeq2SeqLM is not None:
                 model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=effective_device_map, trust_remote_code=trust_remote_code)
             elif model_kind == 'seq_class' and AutoModelForSequenceClassification is not None:
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, device_map=effective_device_map, trust_remote_code=trust_remote_code)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+                if model is not None and gpu_only and device is not None and device >= 0:
+                    model = model.to(torch.device(f'cuda:{device}'))
         except Exception:
             model = None
 
