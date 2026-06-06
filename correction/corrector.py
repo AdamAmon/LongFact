@@ -66,6 +66,8 @@ class Corrector:
                         gpu_only=self.gpu_only,
                     )
                     if model_obj is not None and tokenizer_obj is not None:
+                        # 强制设置 padding_side 为 left
+                        tokenizer_obj.padding_side = "left"
                         try:
                             if self.torch_compile and hasattr(_torch, 'compile'):
                                 try:
@@ -89,6 +91,8 @@ class Corrector:
                         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                     except TypeError:
                         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                    # 强制设置 padding_side 为 left
+                    tokenizer.padding_side = "left"
                     quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
                     # Qwen-style corrector models are causal LMs, so prefer the causal path first.
                     if AutoModelForCausalLM is not None:
@@ -155,6 +159,8 @@ class Corrector:
                                 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                             except TypeError:
                                 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                            # 强制设置 padding_side 为 left
+                            tokenizer.padding_side = "left"
                             if AutoModelForCausalLM is not None:
                                 model = AutoModelForCausalLM.from_pretrained(model_name, device_map={'': device} if self.gpu_only and device >= 0 else 'auto', torch_dtype=_torch.float16)
                                 if hasattr(model, 'generation_config'):
@@ -188,6 +194,8 @@ class Corrector:
                             tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                         except TypeError:
                             tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                        # 强制设置 padding_side 为 left
+                        tokenizer.padding_side = "left"
                         try:
                             tokenizer.clean_up_tokenization_spaces = False
                         except Exception:
@@ -211,6 +219,8 @@ class Corrector:
                                 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                             except TypeError:
                                 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                            # 强制设置 padding_side 为 left
+                            tokenizer.padding_side = "left"
                             try:
                                 tokenizer.clean_up_tokenization_spaces = False
                             except Exception:

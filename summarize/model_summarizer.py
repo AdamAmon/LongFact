@@ -52,7 +52,8 @@ class HFLocalSummarizer:
                     gpu_only=self.gpu_only,
                 )
                 if model_obj is not None and tokenizer_obj is not None:
-                    # Use explicit model + tokenizer to construct pipeline
+                    # 强制设置 padding_side 为 left
+                    tokenizer_obj.padding_side = "left"
                     self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer_obj, truncation=True, trust_remote_code=True)
                     return
                 # if only tokenizer available, let later branches reuse it
@@ -72,6 +73,8 @@ class HFLocalSummarizer:
                     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                 except TypeError:
                     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                # 强制设置 padding_side 为 left
+                tokenizer.padding_side = "left"
                 try:
                     tokenizer.clean_up_tokenization_spaces = False
                 except Exception:
@@ -116,6 +119,8 @@ class HFLocalSummarizer:
                         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, clean_up_tokenization_spaces=False)
                     except TypeError:
                         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+                    # 强制设置 padding_side 为 left
+                    tokenizer.padding_side = "left"
                     try:
                         tokenizer.clean_up_tokenization_spaces = False
                     except Exception:
@@ -149,6 +154,8 @@ class HFLocalSummarizer:
         # pipeline-internal model creation which can leave generation_config defaults.
         try:
             model_obj, tokenizer = load_model_and_tokenizer(model_name, model_kind='causal', load_in_8bit=False, torch_dtype=None, device=device, gpu_only=self.gpu_only)
+            if tokenizer is not None:
+                tokenizer.padding_side = "left"
             if model_obj is not None and tokenizer is not None:
                 self.pipe = pipeline('text-generation', model=model_obj, tokenizer=tokenizer, truncation=True, trust_remote_code=True)
             elif tokenizer is not None:
