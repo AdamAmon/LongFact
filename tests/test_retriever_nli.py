@@ -227,8 +227,8 @@ def test_advanced_retriever_dual_channel(monkeypatch):
         def get_scores(self, tokenized_q):
             return np.array([0.1 * (i + 1) for i in range(len(self.tokenized))])
 
-    monkeypatch.setattr('retrieval.retriever.BM25Okapi', DummyBM25)
-
+    monkeypatch.setattr('retrieval.retriever.BM25Okapi', DummyBM25)    # 清理 _MODEL_CACHE 避免复用前面测试缓存的旧 mock
+    Retriever._MODEL_CACHE.clear()
     passages = [
         "The GDP growth was 3.2 percent in 2023.",
         "Construction contributed 0.8 points to GDP.",
@@ -259,6 +259,7 @@ def test_advanced_retriever_query_batch(monkeypatch):
             return np.array([[1.0, 0.0]])
 
     monkeypatch.setattr('retrieval.retriever.SentenceTransformer', DummyST)
+    Retriever._MODEL_CACHE.clear()
 
     class DummyIndex:
         def __init__(self, dim):
