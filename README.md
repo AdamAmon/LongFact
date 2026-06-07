@@ -1,4 +1,7 @@
-Explanation: Comprehensive README update with commands, progress and performance guidance.
+以下是更新后的完整 `README.md`，整合了单机多 GPU 并行启动、DCE 开关明确说明、性能基准参考、`timing` 字段说明以及多机合并增强命令。你可直接复制替换原有文件。
+
+---
+
 # LongFact — 长文摘要事实一致性评测与纠错（使用说明）
 
 LongFact 是一套面向 NJUniversity 大作业的本地实验流水线，完整覆盖三个任务：
@@ -7,7 +10,7 @@ LongFact 是一套面向 NJUniversity 大作业的本地实验流水线，完整
 - **任务 3.2（分析）**：长度分桶分析 + 纠错案例导出
 - **任务 3.3（进阶）**：DCE 双通道证据检索（检测方向原创改进）
 
-本文档涵盖：GPU/8-bit/FP16 运行建议、实用命令、DCE 进阶检索使用、实时进度、分析脚本与案例导出。
+本文档涵盖：GPU/8-bit/FP16 运行建议、实用命令、DCE 进阶检索使用、实时进度、分析脚本与案例导出、单机多 GPU 并行运行、多机分布式运行。
 
 ## 推荐硬件与软件（本仓库测试环境）
 
@@ -62,16 +65,21 @@ python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --summary
 | 自适应 Top-K | 短句 k=3、中等句 k=5、长句 k=7，减少无效 NLI 调用 |
 | 条件证据扩展 | NLI 低置信度时以 top-3 锚点扩展最近邻段落 |
 
-### 使用方式
+### 如何开启/关闭 DCE？
 
-通过 `--retrieval_strategy` 参数切换：
+通过 `--retrieval_strategy` 参数控制：
+
+- **基线（关闭 DCE）**：`--retrieval_strategy baseline`
+- **开启 DCE**：`--retrieval_strategy dce`（默认值，但建议显式指定以明确意图）
+
+示例：
 
 ```powershell
-# 基线（原有标准检索）
-python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --out results/baseline_n5.jsonl
+# 基线（不使用 DCE）
+python run_experiment.py --n 100 --retrieval_strategy baseline --out results/baseline_n100.jsonl
 
 # DCE 进阶检索
-python run_experiment.py --n 5 --use_model --device 0 --precision fp16 --retrieval_strategy dce --out results/dce_n5.jsonl
+python run_experiment.py --n 100 --retrieval_strategy dce --out results/dce_n100.jsonl
 ```
 
 ### 对比实验
@@ -86,6 +94,46 @@ python run_experiment.py --n 100 --use_model --device 0 --precision fp16 --summa
 # 对比分析
 python scripts/analyze_results.py --in results/baseline_n100.jsonl --out results/baseline_summary.json
 python scripts/analyze_results.py --in results/dce_n100.jsonl --out results/dce_summary.json
+```
+
+## 单机多 GPU 并行启动（数据分片）
+
+若你有一台多 GPU 机器（如 8 张 T4/3070），可使用提供的 `scripts/launch_multi_gpu.sh` 脚本自动将总样本数分片到各 GPU 并行运行，最后合并结果。这比手动指定 `--start/--n` 更省事。
+
+### 基本用法
+
+```bash
+# 8 张 GPU，500 个样本（默认 batch_size=32, max_new_tokens=256, 检索策略=dce, 精度=fp16）
+bash scripts/launch_multi_gpu.sh 8 500
+
+# 完整参数：GPU数量 样本数 batch_size max_tokens 检索策略 精度
+bash scripts/launch_multi_gpu.sh 8 500 32 256 dce fp16
+
+bash scripts/launch_multi_gpu.sh 8 500 32 256 baseline fp16
+```
+
+### 脚本特点
+
+- 自动计算每张 GPU 处理的样本区间（最后一张处理余数）。
+- 每张 GPU 独立日志 `results/multi_gpu_8gpu/gpu{i}.log`，便于排错。
+- 所有分片完成后自动调用 `scripts/merge_results.py` 合并，并生成分析摘要。
+- 支持 `baseline` / `dce` 检索策略切换（通过第5个参数）。
+- 各进程真实隔离（`CUDA_VISIBLE_DEVICES=${gpu}`），避免显存冲突。
+
+### 合并与监控
+
+合并后的文件位于 `results/multi_gpu_${GPU_COUNT}gpu/merged_n${TOTAL_N}_${TIMESTAMP}.jsonl`。  
+运行过程中可用以下命令监控：
+
+```bash
+# 查看运行中的进程数
+watch -n 2 'ps aux | grep run_experiment | wc -l'
+
+# 实时显存占用
+watch -n 1 nvidia-smi
+
+# 查看某张 GPU 的实时日志
+tail -f results/multi_gpu_8gpu/gpu0.log
 ```
 
 ## 实时进度与可视化
@@ -118,7 +166,7 @@ pip install tqdm
 `scripts/analyze_results.py` 支持按 token 或句子做长度分桶（参数 `--bucket-by token|sentence`），并可以导出案例与 CSV：
 
 ```powershell
-python scripts.analyze_results.py --in results/experiment.jsonl --out results/summary.json --cases-out results/cases.json --csv-out results/length_buckets.csv --case-count 10 --bucket-by token
+python scripts/analyze_results.py --in results/experiment.jsonl --out results/summary.json --cases-out results/cases.json --csv-out results/length_buckets.csv --case-count 10 --bucket-by token
 
 python scripts/analyze_results.py --in results/full_n500.jsonl --out results/analysis_summary.json --csv-out results/bucket_metrics.csv --cases-out results/correction_cases.json --case-count 10 --bucket-by token
 
@@ -136,10 +184,55 @@ python scripts/generate_results_table.py --in results/full_n500.jsonl --out-csv 
 - `details`：逐句 NLI 结果与证据（每句包含 `evidences`、`best_label`、`best_score`）
 - `prediction_length` / `corrected_length`：句子/字符/token 统计
 - `summarization_debug`：分块信息，便于排错
+- `timing`：字典，包含 `summarize`, `retrieve`, `nli`, `correct`, `correct_nli` 等阶段耗时（秒），便于定位瓶颈
 
-## 进阶：分阶段耗时（可选）
+## 机房多机运行建议（5 台 RTX 3070，每台处理 100 条样本）
 
-如果你需要精确的分阶段耗时（摘要、检索、NLI、纠错），仓库中已有位置适合加入计时：可在 `run_experiment.py` 的 `run_sample` 中对每个样本记录阶段起止时间并写入结果 JSONL 的 `timing` 字段。我可以为你实现此功能并运行小样本验证，或把实现提交到分支。
+如果你将在机房用 5 台配置为 NVIDIA GeForce RTX 3070（8 GB 专用显存）的机器并行运行，每台处理 100 条样本，推荐如下：
+
+- 首选精度：`--precision fp16`（在 8GB 卡上通常比 8-bit 更稳定）
+- 每台建议 `--summary_batch_size 8`（若显存允许可尝试 12~16，但以 OOM 风险为界）
+- 建议 `--summary_max_new_tokens 64`（保持质量与速度的折中）
+- 每台输出文件建议命名为 `results/hostXX_results.jsonl`（便于后续合并）
+
+示例命令（在 5 台机器上并行运行，覆盖样本区间 1–500，每台处理 100 条）：
+
+```powershell
+# host01: 样本 1 - 100
+python run_experiment.py --start 1   --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host01_results.jsonl
+
+# host02: 样本 101 - 200
+python run_experiment.py --start 101 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host02_results.jsonl
+
+# host03: 样本 201 - 300
+python run_experiment.py --start 201 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host03_results.jsonl
+
+# host04: 样本 301 - 400
+python run_experiment.py --start 301 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host04_results.jsonl
+
+# host05: 样本 401 - 500
+python run_experiment.py --start 401 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host05_results.jsonl
+```
+
+说明：若遇显存不足（OOM），先把 `--summary_batch_size` 降到 `4` 或把 `--summary_max_new_tokens` 降为 `32`，或在该主机上改用 `--load_in_8bit` 作为后备方案。
+
+## 合并多机结果
+
+在所有机器完成后，你可以把所有 `results/host*_results.jsonl` 文件复制到一台汇总机器（或 NFS 共享目录），使用下面的命令合并为一个 JSONL 文件并去重：
+
+```bash
+# 合并所有 host 结果，自动按 id 去重
+python scripts/merge_results.py --out merged_500.jsonl results/host*.jsonl
+```
+
+脚本会：
+
+- 顺序读取所有输入文件（支持通配符）
+- 验证每行为合法 JSON 并写入输出文件
+- 如果记录包含 `id` 字段，会按 `id` 去重，保留第一次出现的记录
+- 返回合并后的总条数
+
+脚本位于：`scripts/merge_results.py`。
 
 ## 常用调试与排错命令
 
@@ -171,7 +264,7 @@ python run_experiment.py --n 1 --start 4 --use_model --model_name Qwen/Qwen2.5-1
 - `run_experiment.py`：新增 `--retrieval_strategy baseline|dce` 参数，支持策略切换对比实验。
 - `eval/evaluate.py`：句子级 `compute_support_rate()` 增加 `tqdm` 可视进度（`show_progress`）。
 - `correction/corrector.py`：`correct_batch()` 增加 `tqdm` 可视进度与 `show_progress` 参数。
-- `run_experiment.py`：在原始 NLI / 批量纠错 / 纠错后 NLI 三处启用进度显示，支持分阶段耗时记录。
+- `run_experiment.py`：在原始 NLI / 批量纠错 / 纠错后 NLI 三处启用进度显示，支持分阶段耗时记录（`timing` 字段）。
 
 ## 当前状态
 
@@ -179,57 +272,8 @@ python run_experiment.py --n 1 --start 4 --use_model --model_name Qwen/Qwen2.5-1
 - ✅ 任务 3.2（分析）：长度分桶 + 案例导出（已有 n=500 实验结果）
 - ✅ 任务 3.3（进阶-检测方向）：DCE 双通道证据检索已实现，16 项测试全部通过
 - ✅ 分阶段耗时统计：已在 `timing` 字段中记录每个样本的各阶段耗时
-
-## 机房多机运行建议（5 台 RTX 3070，每台处理 100 条样本）
-
-如果你将在机房用 5 台配置为 NVIDIA GeForce RTX 3070（8 GB 专用显存）的机器并行运行，每台处理 100 条样本，推荐如下：
-
-- 首选精度：`--precision fp16`（在 8GB 卡上通常比 8-bit 更稳定）
-- 每台建议 `--summary_batch_size 8`（若显存允许可尝试 12~16，但以 OOM 风险为界）
-- 建议 `--summary_max_new_tokens 64`（保持质量与速度的折中）
-- 每台输出文件建议命名为 `results/hostXX_results.jsonl`（便于后续合并）
-
-示例命令（在 5 台机器上并行运行，覆盖样本区间 1–500，每台处理 100 条）：
-
-在每台机器上把输出文件名按主机编号命名（`host01_results.jsonl` … `host05_results.jsonl`），并为每台指定 `--start` 起始样本索引与 `--n` 数量。示例：
-
-```powershell
-# host01: 样本 1 - 100
-python run_experiment.py --start 1   --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host01_results.jsonl
-
-# host02: 样本 101 - 200
-python run_experiment.py --start 101 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host02_results.jsonl
-
-# host03: 样本 201 - 300
-python run_experiment.py --start 201 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host03_results.jsonl
-
-# host04: 样本 301 - 400
-python run_experiment.py --start 301 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host04_results.jsonl
-
-# host05: 样本 401 - 500
-python run_experiment.py --start 401 --n 100 --use_model --model_name Qwen/Qwen2.5-1.5B-Instruct --device 0 --precision fp16 --summary_batch_size 8  --summary_max_new_tokens 64 --out results/host05_results.jsonl
-```
-
-说明：若遇显存不足（OOM），先把 `--summary_batch_size` 降到 `4` 或把 `--summary_max_new_tokens` 降为 `32`，或在该主机上改用 `--load_in_8bit` 作为后备方案。
-
-## 合并多机结果
-
-在所有机器完成后，你可以把所有 `results/host*_results.jsonl` 文件复制到一台汇总机器（或 NFS 共享目录），使用下面提供的脚本合并为一个 JSONL 文件并去重（若每条记录包含 `id` 字段则按 `id` 去重）：
-
-用法示例：
-
-```powershell
-python scripts/merge_results.py --out results/merged_5hosts.jsonl results/host*_results.jsonl
-```
-
-脚本会：
-
-- 顺序读取所有输入文件（支持通配符）
-- 验证每行为合法 JSON 并写入输出文件
-- 如果记录包含 `id` 字段，会按 `id` 去重，保留第一次出现的记录
-- 返回合并后的总条数
-
-脚本位于：`scripts/merge_results.py`。
+- ✅ 单机多 GPU 并行启动脚本：`scripts/launch_multi_gpu.sh` 可用
+- ✅ 多机结果合并脚本：`scripts/merge_results.py` 支持去重
 
 ## 项目结构（快速导航）
 
@@ -267,7 +311,7 @@ pytest -q
 
 ## 平台注意事项
 
-- `bitsandbytes` 在 `requirements.txt` 中对 Windows 平台被条件排除（见文件头）。在 Windows 上若要使用 8-bit，请参考 bitsandbytes 官方安装说明并在虚拟环境中手动安装兼容版本。默认在 Windows 环境下优先使用 `fp16` 或 CPU 回退。 
+- `bitsandbytes` 在 `requirements.txt` 中对 Windows 平台被条件排除（见文件头）。在 Windows 上若要使用 8-bit，请参考 bitsandbytes 官方安装说明并在虚拟环境中手动安装兼容版本。默认在 Windows 环境下优先使用 `fp16` 或 CPU 回退。
 
 ## CLI 参数速查
 
@@ -287,3 +331,4 @@ pytest -q
 | `--step` | int | 0 | 分批大小（>0 时分批运行） |
 | `--out` | str | experiment_results.jsonl | 输出文件路径 |
 
+---
