@@ -129,7 +129,9 @@ done
 
 python scripts/merge_results.py \
     "${INPUT_FILES[@]}" \
-    --out "${MERGED}"
+    --out "${MERGED}" \
+    --no-dedupe \
+    --renumber-ids
 
 RECORDS=$(wc -l < "${MERGED}")
 echo "  合并完成: ${RECORDS} 条记录"
