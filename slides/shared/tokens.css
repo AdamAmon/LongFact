@@ -1,0 +1,479 @@
+/* === LongFact Design Tokens ===
+ * Shared design tokens for all slide pages.
+ * Canvas: 1920×1080px, 16:9 aspect ratio.
+ * Color philosophy: temperate academic — warm paper base, single slate-blue accent, rust-orange highlights.
+ */
+
+:root {
+  /* ── Canvas ── */
+  --slide-width: 1920px;
+  --slide-height: 1080px;
+
+  /* ── Color Palette (oklch for perceptual uniformity) ── */
+  /* Base: warm off-white with paper grain feel */
+  --color-bg:            oklch(0.985 0.002 95);
+  --color-bg-alt:        oklch(0.965 0.003 95);
+  --color-surface:       oklch(0.992 0.001 95);
+
+  /* Primary accent: deep slate-blue — evokes academic rigor, factual precision */
+  --color-primary:       oklch(0.38 0.08 255);
+  --color-primary-light: oklch(0.48 0.06 255);
+  --color-primary-dark:  oklch(0.28 0.08 255);
+
+  /* Warm accent: rust-orange — for highlights, key numbers, emphasis */
+  --color-accent:        oklch(0.55 0.18 45);
+  --color-accent-light:  oklch(0.65 0.14 45);
+  --color-accent-dark:   oklch(0.45 0.18 45);
+
+  /* Neutrals */
+  --color-text:          oklch(0.18 0.01 255);
+  --color-text-secondary:oklch(0.38 0.01 255);
+  --color-text-muted:    oklch(0.55 0.01 255);
+  --color-border:        oklch(0.85 0.01 255);
+  --color-border-light:  oklch(0.90 0.01 255);
+
+  /* Semantic colors */
+  --color-success:       oklch(0.55 0.15 155);
+  --color-warning:       oklch(0.65 0.16 80);
+  --color-error:         oklch(0.50 0.19 25);
+
+  /* Code block colors */
+  --color-code-bg:       oklch(0.15 0.02 255);
+  --color-code-text:     oklch(0.88 0.01 255);
+  --color-code-keyword:  oklch(0.68 0.16 290);  /* purple-ish */
+  --color-code-string:   oklch(0.62 0.14 155);  /* green-ish */
+  --color-code-comment:  oklch(0.50 0.02 255);  /* muted */
+  --color-code-func:     oklch(0.68 0.16 50);   /* gold-ish */
+  --color-code-number:   oklch(0.62 0.14 35);   /* warm */
+
+  /* ── Typography Scale (modular scale 1.25) ── */
+  --font-display-cn:     'Noto Serif SC', 'Source Han Serif SC', serif;
+  --font-display-en:     'Lora', 'Georgia', serif;
+  --font-body:           'Noto Serif SC', 'Source Han Serif SC', serif;
+  --font-mono:           'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  --text-hero:           120px;
+  --text-h1:             72px;
+  --text-h2:             48px;
+  --text-h3:             32px;
+  --text-body:           19px;
+  --text-body-sm:        16px;
+  --text-caption:        14px;
+  --text-code:           15px;
+
+  --leading-body:        1.78;
+  --leading-heading:     1.25;
+
+  /* ── Spacing Rhythm (8px base) ── */
+  --space-xs:            8px;
+  --space-sm:            16px;
+  --space-md:            24px;
+  --space-lg:            40px;
+  --space-xl:            64px;
+  --space-2xl:           96px;
+
+  /* ── Header Bar ── */
+  --header-height:       72px;
+  --header-accent-strip: 4px;
+
+  /* ── Shadows ── */
+  --shadow-sm:           0 1px 3px oklch(0 0 0 / 0.06);
+  --shadow-md:           0 4px 16px oklch(0 0 0 / 0.08);
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ── Slide Canvas ── */
+.slide {
+  width: var(--slide-width);
+  height: var(--slide-height);
+  background:
+    radial-gradient(ellipse at 20% 10%, oklch(0.992 0.005 95) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 90%, oklch(0.988 0.004 95) 0%, transparent 50%),
+    var(--color-bg);
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-body);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header Bar (shared across all content pages) ── */
+.slide-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-height);
+  padding: 0 var(--space-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+  z-index: 10;
+}
+
+.slide-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-accent-strip);
+  background: var(--color-primary);
+}
+
+.slide-header .kick {
+  font-family: var(--font-display-en);
+  font-style: italic;
+  font-size: var(--text-body-sm);
+  color: var(--color-accent);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.slide-header .page-title {
+  font-family: var(--font-display-cn);
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--color-text);
+  letter-spacing: 0.02em;
+}
+
+/* ── Content Area ── */
+.slide-body {
+  flex: 1;
+  padding: calc(var(--header-height) + var(--space-lg)) var(--space-xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ── Page Number ── */
+.page-number {
+  position: absolute;
+  bottom: var(--space-md);
+  right: var(--space-xl);
+  font-family: var(--font-display-en);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+}
+
+/* ── Cover-specific ── */
+.cover {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.cover .project-name {
+  font-family: var(--font-display-cn);
+  font-weight: 900;
+  font-size: var(--text-hero);
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  margin-bottom: var(--space-md);
+  max-width: 1400px;
+}
+
+.cover .project-name .highlight {
+  color: var(--color-accent);
+}
+
+.cover .subtitle-en {
+  font-family: var(--font-display-en);
+  font-style: italic;
+  font-size: 34px;
+  color: var(--color-text-secondary);
+  max-width: 1100px;
+  line-height: 1.4;
+  margin-bottom: var(--space-xl);
+}
+
+.cover .subtitle-en em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.cover .meta {
+  font-family: var(--font-display-cn);
+  font-size: 20px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  line-height: 2;
+}
+
+/* ── Section heading ── */
+.section-heading {
+  font-family: var(--font-display-cn);
+  font-weight: 900;
+  font-size: var(--text-h2);
+  color: var(--color-primary);
+  margin-bottom: var(--space-lg);
+  letter-spacing: 0.02em;
+  position: relative;
+  padding-bottom: var(--space-sm);
+}
+
+.section-heading::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 120px;
+  height: 3px;
+  background: var(--color-accent);
+}
+
+/* ── Body text ── */
+.body-text {
+  font-family: var(--font-display-cn);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--color-text);
+}
+
+.body-text .accent {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+/* ── Two-column layout ── */
+.cols-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  flex: 1;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: var(--space-lg);
+  border-radius: 2px;
+}
+
+.card h3 {
+  font-family: var(--font-display-cn);
+  font-weight: 900;
+  font-size: var(--text-h3);
+  color: var(--color-primary-dark);
+  margin-bottom: var(--space-md);
+}
+
+/* ── Stat boxes ── */
+.stat-row {
+  display: flex;
+  gap: var(--space-lg);
+  margin: var(--space-lg) 0;
+}
+
+.stat {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+}
+
+.stat .value {
+  font-family: var(--font-display-en);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  color: var(--color-accent);
+  line-height: 1.1;
+}
+
+.stat .label {
+  font-family: var(--font-display-cn);
+  font-size: var(--text-body-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-xs);
+}
+
+/* ── Code block ── */
+.code-block {
+  background: var(--color-code-bg);
+  border-radius: 4px;
+  padding: var(--space-md);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 1.65;
+  color: var(--color-code-text);
+  position: relative;
+}
+
+.code-block .kw  { color: var(--color-code-keyword); }
+.code-block .str { color: var(--color-code-string); }
+.code-block .cm  { color: var(--color-code-comment); }
+.code-block .fn  { color: var(--color-code-func); }
+.code-block .num { color: var(--color-code-number); }
+
+/* ── Table ── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-sm);
+}
+
+.data-table thead th {
+  background: var(--color-primary);
+  color: white;
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--font-display-cn);
+  font-weight: 700;
+  text-align: center;
+  font-size: var(--text-body-sm);
+}
+
+.data-table tbody td {
+  padding: var(--space-sm) var(--space-md);
+  text-align: center;
+  border-bottom: 1px solid var(--color-border-light);
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.data-table tbody tr:nth-child(even) td {
+  background: var(--color-bg-alt);
+}
+
+.data-table .highlight-cell {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+/* ── Key list ── */
+.key-list {
+  list-style: none;
+  padding: 0;
+}
+
+.key-list li {
+  font-family: var(--font-display-cn);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.key-list li::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  min-width: 8px;
+  height: 8px;
+  margin-top: 9px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+/* ── Mechanism grid (4-card) ── */
+.mechanism-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--space-md);
+  flex: 1;
+}
+
+.mech-card {
+  border: 1px solid var(--color-border);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.mech-card .mech-num {
+  font-family: var(--font-display-en);
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--color-accent);
+  opacity: 0.3;
+  line-height: 1;
+}
+
+.mech-card .mech-title {
+  font-family: var(--font-display-cn);
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--color-primary-dark);
+}
+
+.mech-card .mech-desc {
+  font-family: var(--font-display-cn);
+  font-size: var(--text-body-sm);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+
+/* ── Flow chart (SVG) ── */
+.flow-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Chart container ── */
+.chart-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  padding: 2px var(--space-xs);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+  border-radius: 2px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Quote ── */
+.pull-quote {
+  font-family: var(--font-display-en);
+  font-style: italic;
+  font-size: 26px;
+  color: var(--color-primary);
+  line-height: 1.5;
+  padding-left: var(--space-lg);
+  border-left: 4px solid var(--color-accent);
+  margin: var(--space-lg) 0;
+}
+
+/* ── Tag ── */
+.tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 2px 10px;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}

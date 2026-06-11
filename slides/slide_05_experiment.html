@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 数据集与实验设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .exp-layout {
+    display: grid;
+    grid-template-columns: 0.7fr 1.3fr;
+    gap: var(--space-xl);
+    flex: 1;
+  }
+  .exp-left {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+  .exp-left .info-block {
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .exp-left .info-block h4 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 16px;
+    color: var(--color-primary);
+    margin-bottom: var(--space-sm);
+  }
+  .exp-left .info-block p {
+    font-family: var(--font-display-cn);
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--color-text-secondary);
+  }
+  .param-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-body-sm);
+  }
+  .param-table thead th {
+    background: var(--color-primary);
+    color: white;
+    padding: 12px var(--space-md);
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    text-align: left;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+  .param-table tbody td {
+    padding: 11px var(--space-md);
+    border-bottom: 1px solid var(--color-border-light);
+    font-family: var(--font-display-cn);
+    font-size: 15px;
+    color: var(--color-text);
+    line-height: 1.5;
+  }
+  .param-table tbody td.code {
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+  .param-table tbody tr:nth-child(even) td {
+    background: var(--color-bg-alt);
+  }
+  .param-table .cat-header td {
+    background: var(--color-primary-light) !important;
+    color: white;
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 14px;
+    padding: 8px var(--space-md);
+  }
+  .pipeline-formula {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    background: var(--color-bg-alt);
+    border: 1px solid var(--color-border);
+    padding: var(--space-md);
+    text-align: center;
+    color: var(--color-text-secondary);
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Experiment Setup</span>
+    <span class="page-title">数据集与实验设计</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">GovReport 数据集 · 500 样本 · 两组对比实验</h2>
+
+    <div class="exp-layout">
+
+      <!-- Left: Dataset info -->
+      <div class="exp-left">
+
+        <div class="info-block">
+          <h4>数据来源</h4>
+          <p>GovReport Dataset<br><span class="badge">ccdv/govreport-summarization</span><br>
+          美国政府报告 + 专家摘要<br>
+          Train 17,517 / Val 973 / Test 973<br>
+          文档平均 ~9,000 tokens</p>
+        </div>
+
+        <div class="info-block">
+          <h4>预处理方法</h4>
+          <p>chunk_text() 按句边界分块<br>
+          每块约 200 tokens<br>
+          分块摘要后顺序拼接融合</p>
+        </div>
+
+        <div class="info-block">
+          <h4>评估指标</h4>
+          <p><strong>事实一致性</strong>：句子级支持率<br>= #supported / #total sentences<br>
+          <strong>内容重叠</strong>：ROUGE-1/2/L F1<br>（仅作样式完整性检查）</p>
+        </div>
+
+        <div class="pipeline-formula">
+          doc → chunk → summary →<br>
+          retrieve → NLI → correct →<br>
+          re-evaluate
+        </div>
+      </div>
+
+      <!-- Right: Experiment config table -->
+      <div>
+        <table class="param-table">
+          <thead>
+            <tr><th colspan="2">实验配置总览</th></tr>
+          </thead>
+          <tbody>
+            <tr class="cat-header"><td colspan="2">数据与规模</td></tr>
+            <tr>
+              <td>数据集</td>
+              <td class="code">GovReport (validation split)</td>
+            </tr>
+            <tr>
+              <td>样本数</td>
+              <td class="code">N = 500, start_index = 0</td>
+            </tr>
+
+            <tr class="cat-header"><td colspan="2">模型选型</td></tr>
+            <tr>
+              <td>摘要 / 纠错</td>
+              <td class="code">Qwen/Qwen2.5-1.5B-Instruct</td>
+            </tr>
+            <tr>
+              <td>NLI 判定</td>
+              <td class="code">facebook/bart-large-mnli</td>
+            </tr>
+            <tr>
+              <td>检索嵌入</td>
+              <td class="code">sentence-transformers/all-MiniLM-L6-v2</td>
+            </tr>
+
+            <tr class="cat-header"><td colspan="2">训练与推理参数</td></tr>
+            <tr>
+              <td>精度</td>
+              <td class="code">fp16</td>
+            </tr>
+            <tr>
+              <td>硬件</td>
+              <td class="code">NVIDIA RTX 4060 Laptop (8 GB VRAM)</td>
+            </tr>
+            <tr>
+              <td>摘要 max_new_tokens</td>
+              <td class="code">64</td>
+            </tr>
+            <tr>
+              <td>摘要 batch_size</td>
+              <td class="code">8</td>
+            </tr>
+            <tr>
+              <td>NLI 阈值</td>
+              <td class="code">0.6</td>
+            </tr>
+            <tr>
+              <td>NLI 聚合策略</td>
+              <td class="code">max</td>
+            </tr>
+            <tr>
+              <td>检索 Top-K</td>
+              <td class="code">3</td>
+            </tr>
+
+            <tr class="cat-header"><td colspan="2">实验分组（控制生成方差）</td></tr>
+            <tr>
+              <td>Baseline</td>
+              <td class="code">--retrieval_strategy baseline</td>
+            </tr>
+            <tr>
+              <td>DCE</td>
+              <td class="code">--retrieval_strategy dce</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <div class="page-number">5 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

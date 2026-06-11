@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LongFact — 答辩演示文稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: oklch(0.12 0.01 255);
+    --surface: oklch(0.16 0.01 255);
+    --border: oklch(0.25 0.01 255);
+    --text: oklch(0.90 0.01 255);
+    --text-muted: oklch(0.60 0.01 255);
+    --accent: oklch(0.65 0.14 45);
+    --primary: oklch(0.55 0.08 255);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Noto Serif SC', serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── Slideshow (single-slide view) ── */
+  #slideshow {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  #slide-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    object-fit: contain;
+  }
+
+  /* ── Controls bar ── */
+  #controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #controls:hover, #controls.visible { opacity: 1; }
+
+  #controls button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+  #controls button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  #controls button:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  #page-indicator {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: center;
+  }
+
+  /* ── Overview toggle ── */
+  #overview {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 200;
+    display: none;
+    overflow-y: auto;
+    padding: 40px;
+  }
+  #overview.active { display: block; }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 24px;
+    max-width: 1800px;
+    margin: 0 auto;
+  }
+  .overview-card {
+    aspect-ratio: 16/9;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .overview-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+  }
+  .overview-card iframe {
+    width: 1920px;
+    height: 1080px;
+    border: none;
+    transform: scale(0.186); /* ~357/1920 */
+    transform-origin: top left;
+    pointer-events: none;
+  }
+  .overview-card .card-label {
+    position: absolute;
+    bottom: 8px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: linear-gradient(transparent, var(--surface) 60%);
+    padding: 24px 8px 6px;
+    pointer-events: none;
+  }
+  .overview-close {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    z-index: 210;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+  .overview-close:hover { border-color: var(--accent); }
+  .overview-title {
+    text-align: center;
+    margin-bottom: 32px;
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 900;
+    font-size: 28px;
+    color: var(--text);
+  }
+
+  /* ── Keyboard hint ── */
+  #kbd-hint {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    z-index: 99;
+    opacity: 0;
+    transition: opacity 0.3s;
+    background: var(--surface);
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    pointer-events: none;
+  }
+  #kbd-hint.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- Slideshow -->
+<div id="slideshow">
+  <iframe id="slide-frame" src="" allow="autoplay"></iframe>
+</div>
+
+<!-- Keyboard hint -->
+<div id="kbd-hint">
+  ← → 翻页 &nbsp;|&nbsp; G 概览 &nbsp;|&nbsp; F 全屏 &nbsp;|&nbsp; 1–0 跳转
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="btn-prev" title="Previous (←)">← 上一页</button>
+  <span id="page-indicator">1 / 10</span>
+  <button id="btn-next" title="Next (→)">下一页 →</button>
+  <span style="color:var(--border);margin:0 8px;">|</span>
+  <button id="btn-overview" title="Overview (G)">▦ 概览</button>
+  <button id="btn-fullscreen" title="Fullscreen (F)">⛶ 全屏</button>
+</div>
+
+<!-- Overview grid -->
+<div id="overview">
+  <button class="overview-close" id="btn-overview-close">✕ 关闭 (Esc)</button>
+  <div class="overview-title">LongFact — 答辩演示概览</div>
+  <div class="overview-grid" id="overview-grid"></div>
+</div>
+
+<script>
+// MANIFEST — list all slides in order
+const MANIFEST = [
+  { file: 'slide_01_cover.html',       label: '封面' },
+  { file: 'slide_02_background.html',  label: '项目背景与目标' },
+  { file: 'slide_03_tech_route.html',  label: '技术路线总览' },
+  { file: 'slide_04_core_algorithm.html', label: '核心模型与算法' },
+  { file: 'slide_05_experiment.html',  label: '数据集与实验设计' },
+  { file: 'slide_06_results_1.html',   label: '实验结果（上）' },
+  { file: 'slide_07_results_2.html',   label: '实验结果（下）' },
+  { file: 'slide_08_innovation.html',  label: '创新点' },
+  { file: 'slide_09_reflection.html',  label: '问题与反思' },
+  { file: 'slide_10_outlook.html',     label: '未来展望与致谢' },
+];
+
+let currentPage = 0;
+const frame = document.getElementById('slide-frame');
+const indicator = document.getElementById('page-indicator');
+const controls = document.getElementById('controls');
+const kbdHint = document.getElementById('kbd-hint');
+const overview = document.getElementById('overview');
+
+function showPage(idx) {
+  if (idx < 0 || idx >= MANIFEST.length) return;
+  currentPage = idx;
+  frame.src = MANIFEST[idx].file;
+  indicator.textContent = `${idx + 1} / ${MANIFEST.length}`;
+  updateButtons();
+}
+
+function updateButtons() {
+  document.getElementById('btn-prev').disabled = (currentPage === 0);
+  document.getElementById('btn-next').disabled = (currentPage === MANIFEST.length - 1);
+}
+
+// ── Overview ──
+function buildOverview() {
+  const grid = document.getElementById('overview-grid');
+  grid.innerHTML = '';
+  MANIFEST.forEach((slide, i) => {
+    const card = document.createElement('div');
+    card.className = 'overview-card';
+    card.innerHTML = `<iframe src="${slide.file}" loading="lazy"></iframe>
+      <div class="card-label">${i + 1}. ${slide.label}</div>`;
+    card.addEventListener('click', () => {
+      overview.classList.remove('active');
+      showPage(i);
+    });
+    grid.appendChild(card);
+  });
+}
+
+function toggleOverview() {
+  if (overview.classList.contains('active')) {
+    overview.classList.remove('active');
+  } else {
+    buildOverview();
+    overview.classList.add('active');
+  }
+}
+
+// ── Fullscreen ──
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen();
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// ── Event listeners ──
+document.getElementById('btn-prev').addEventListener('click', () => showPage(currentPage - 1));
+document.getElementById('btn-next').addEventListener('click', () => showPage(currentPage + 1));
+document.getElementById('btn-overview').addEventListener('click', toggleOverview);
+document.getElementById('btn-overview-close').addEventListener('click', toggleOverview);
+document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (overview.classList.contains('active')) {
+    if (e.key === 'Escape') toggleOverview();
+    return;
+  }
+  switch (e.key) {
+    case 'ArrowLeft':  case 'ArrowUp':   e.preventDefault(); showPage(currentPage - 1); break;
+    case 'ArrowRight': case 'ArrowDown': e.preventDefault(); showPage(currentPage + 1); break;
+    case 'Home':       e.preventDefault(); showPage(0); break;
+    case 'End':        e.preventDefault(); showPage(MANIFEST.length - 1); break;
+    case 'g': case 'G': e.preventDefault(); toggleOverview(); break;
+    case 'f': case 'F': e.preventDefault(); toggleFullscreen(); break;
+    default:
+      if (e.key >= '1' && e.key <= '9') { e.preventDefault(); showPage(parseInt(e.key) - 1); }
+      if (e.key === '0') { e.preventDefault(); showPage(9); }
+      break;
+  }
+});
+
+// Show controls on mouse move
+let hideTimer;
+document.addEventListener('mousemove', () => {
+  controls.classList.add('visible');
+  kbdHint.classList.add('visible');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    controls.classList.remove('visible');
+    kbdHint.classList.remove('visible');
+  }, 3000);
+});
+
+// Touch support
+let touchStartY = 0;
+document.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; });
+document.addEventListener('touchend', (e) => {
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dy) > 50) {
+    showPage(currentPage + (dy > 0 ? -1 : 1));
+  }
+});
+
+// Start
+showPage(0);
+</script>
+
+</body>
+</html>

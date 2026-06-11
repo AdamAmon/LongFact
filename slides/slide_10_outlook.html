@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 未来展望与致谢</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .outlook-layout {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: var(--space-xl);
+    flex: 1;
+  }
+  .future-box {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+  }
+  .future-box h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 24px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 2px solid var(--color-accent);
+    display: inline-block;
+  }
+  .future-items {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+    flex: 1;
+  }
+  .future-item {
+    border: 1px solid var(--color-border-light);
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+  }
+  .future-item .f-icon {
+    font-family: var(--font-display-en);
+    font-size: 28px;
+    color: var(--color-primary);
+    opacity: 0.4;
+    margin-bottom: 4px;
+  }
+  .future-item h4 {
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--color-text);
+  }
+  .future-item p {
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--color-text-secondary);
+    flex: 1;
+  }
+  .thanks-box {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+  .thanks-main {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+  .thanks-main h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 32px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-lg);
+  }
+  .thanks-main .thanks-text {
+    font-family: var(--font-display-cn);
+    font-size: var(--text-body);
+    line-height: 2;
+    color: var(--color-text-secondary);
+  }
+  .thanks-main .thanks-text strong {
+    color: var(--color-primary);
+  }
+  .thanks-divider {
+    width: 60px;
+    height: 3px;
+    background: var(--color-accent);
+    margin: var(--space-lg) auto;
+  }
+  .model-badges {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-top: var(--space-md);
+  }
+  .model-badge {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-alt);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+  .repo-box {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    text-align: center;
+  }
+  .repo-box h4 {
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-xs);
+  }
+  .repo-box .repo-link {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--color-primary);
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Epilogue</span>
+    <span class="page-title">未来展望与致谢</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">从单轮纠错走向迭代验证 · 从自动评估走向人工融合</h2>
+
+    <div class="outlook-layout">
+
+      <!-- Future directions -->
+      <div class="future-box">
+        <h3>改进方向</h3>
+        <div class="future-items">
+
+          <div class="future-item">
+            <div class="f-icon">⟳</div>
+            <h4>多轮迭代自验证</h4>
+            <p>引入 Verify-Correct-Verify 循环，每轮对纠错结果重新做 NLI 判定，直到收敛或达到最大轮次。</p>
+          </div>
+
+          <div class="future-item">
+            <div class="f-icon">⚓</div>
+            <h4>实体/数字保护机制</h4>
+            <p>在纠错 prompt 中显式约束：保留原文中的命名实体、数值和时间表达，仅改写动词和修饰语。</p>
+          </div>
+
+          <div class="future-item">
+            <div class="f-icon">⇶</div>
+            <h4>查询改写 + 迭代检索</h4>
+            <p>对初始证据不足的句子（NEUTRAL），用 LLM 改写查询语句后再检索，扩大证据覆盖。</p>
+          </div>
+
+          <div class="future-item">
+            <div class="f-icon">⊕</div>
+            <h4>独立纠错模型</h4>
+            <p>使用与摘要生成不同的模型（如 flan-t5-large）做纠错，消除生成偏差传播。</p>
+          </div>
+
+          <div class="future-item">
+            <div class="f-icon">⊡</div>
+            <h4>跨数据集泛化验证</h4>
+            <p>在 PubMed、arXiv、BigPatent 等长文档摘要数据集上评估管道泛化能力。</p>
+          </div>
+
+          <div class="future-item">
+            <div class="f-icon">☉</div>
+            <h4>人工评估融合</h4>
+            <p>引入人工标注验证 NLI 判定质量，建立自动指标与人类判断的校准曲线。</p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Thanks -->
+      <div class="thanks-box">
+        <div class="thanks-main">
+          <h3>致谢</h3>
+          <div class="thanks-divider"></div>
+          <div class="thanks-text">
+            感谢 <strong>NJUniversity</strong> 课程团队的指导<br>
+            感谢开源 NLP 社区提供<br>
+            <strong>GovReport</strong> 数据集 · <strong>Qwen2.5</strong> · <strong>BART-MNLI</strong><br>
+            <strong>Sentence-BERT</strong> · <strong>FAISS</strong> 等优秀工具<br>
+            使本研究得以完成
+          </div>
+          <div class="model-badges">
+            <span class="model-badge">Qwen/Qwen2.5-1.5B-Instruct</span>
+            <span class="model-badge">facebook/bart-large-mnli</span>
+            <span class="model-badge">all-MiniLM-L6-v2</span>
+            <span class="model-badge">GovReport</span>
+          </div>
+        </div>
+
+        <div class="repo-box">
+          <h4>项目代码与实验数据</h4>
+          <div class="repo-link">LongFact — 长文摘要事实一致性评测与纠错</div>
+          <p style="font-family:var(--font-display-cn);font-size:13px;color:var(--color-text-muted);margin-top:4px;">
+            武炳超 · 231880382 · NJUniversity · 2026
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-number">10 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

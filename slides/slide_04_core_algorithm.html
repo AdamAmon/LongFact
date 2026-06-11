@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 核心模型与算法：DCE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .dce-layout {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: var(--space-lg);
+    flex: 1;
+  }
+  .dce-left {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+  .dce-intro {
+    font-family: var(--font-display-cn);
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+    color: var(--color-text-secondary);
+  }
+  .dce-intro strong {
+    color: var(--color-primary);
+  }
+  .mech-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: var(--space-sm);
+    flex: 1;
+  }
+  .mech-card {
+    border: 1px solid var(--color-border);
+    padding: 18px 22px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  .mech-card .mech-num {
+    position: absolute;
+    top: 6px;
+    right: 16px;
+    font-family: var(--font-display-en);
+    font-size: 42px;
+    font-weight: 700;
+    color: var(--color-accent);
+    opacity: 0.12;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .mech-card .mech-title {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 18px;
+    color: var(--color-primary-dark);
+    margin-bottom: 4px;
+  }
+  .mech-card .mech-eng {
+    font-family: var(--font-display-en);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-bottom: 6px;
+  }
+  .mech-card .mech-desc {
+    font-family: var(--font-display-cn);
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--color-text-secondary);
+    flex: 1;
+  }
+  .mech-card .mech-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-accent);
+    margin-top: auto;
+  }
+  .code-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+  .code-col .code-label {
+    font-family: var(--font-display-en);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+  }
+  .code-col .code-block {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .formula-box {
+    border: 1px solid var(--color-border);
+    padding: var(--space-md);
+    background: var(--color-bg-alt);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--color-text);
+  }
+  .formula-box .hl { color: var(--color-accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Core Algorithm</span>
+    <span class="page-title">核心模型与算法：DCE 双通道证据检索</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">检索哲学：更精确的证据 &gt; 更多的证据</h2>
+
+    <div class="dce-layout">
+
+      <!-- Left: 4 mechanisms -->
+      <div class="dce-left">
+        <p class="dce-intro">
+          <strong>DCE</strong>（Dual-Channel Evidence Retrieval with Entailment-Guided Re-Ranking）包含四项原创机制，均为<strong>零额外模型开销</strong>设计。
+        </p>
+
+        <div class="mech-grid">
+
+          <div class="mech-card">
+            <div class="mech-num">01</div>
+            <div class="mech-title">双通道检索融合</div>
+            <div class="mech-eng">Dual-Channel Fusion</div>
+            <div class="mech-desc">语义嵌入（SBERT + FAISS）+ 关键词 BM25 独立检索，加权合并去重（0.6 / 0.4），弥补词汇语义鸿沟。</div>
+            <div class="mech-tag">semantic + keyword</div>
+          </div>
+
+          <div class="mech-card">
+            <div class="mech-num">02</div>
+            <div class="mech-title">轻量级重排序</div>
+            <div class="mech-eng">Lightweight Re-Ranking</div>
+            <div class="mech-desc">n-gram Jaccard 重叠（60%）+ 实体命中 + 位置连贯性，三项启发式打分，无需额外模型推理。</div>
+            <div class="mech-tag">zero additional cost</div>
+          </div>
+
+          <div class="mech-card">
+            <div class="mech-num">03</div>
+            <div class="mech-title">自适应 Top-K</div>
+            <div class="mech-eng">Adaptive Top-K</div>
+            <div class="mech-desc">短句 k=3 / 中等 k=5 / 长句 k=7，基于句子词数动态调整，减少无效 NLI 调用。</div>
+            <div class="mech-tag">sentence-length aware</div>
+          </div>
+
+          <div class="mech-card">
+            <div class="mech-num">04</div>
+            <div class="mech-title">条件证据扩展</div>
+            <div class="mech-eng">Conditional Expansion</div>
+            <div class="mech-desc">NLI 置信度 &lt; 0.6 时激活，以 top-3 锚点在 FAISS 索引中找最近邻段落，按需扩展候选池。</div>
+            <div class="mech-tag">on-demand activation</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Right: Code + re-rank formula -->
+      <div class="code-col">
+        <span class="code-label">▸ retrieval/advanced_retriever.py — query()</span>
+        <div class="code-block" style="flex:1.4;">
+<pre><span class="cm"># DCE 增强版 query：双通道 → 重排序 → top-k</span>
+<span class="kw">def</span> <span class="fn">query</span>(<span class="kw">self</span>, text, top_k=5):
+    adaptive_k = <span class="kw">self</span>.adaptive_top_k(text, base_k=top_k)
+
+    <span class="cm"># 通道 1: 双通道检索（语义 + 关键词）</span>
+    candidates = <span class="kw">self</span>._dual_channel_search(text, adaptive_k)
+
+    <span class="cm"># 通道 2: 轻量级重排序</span>
+    ranked = <span class="kw">self</span>._rerank(text, candidates)
+
+    <span class="cm"># 记录供条件扩展使用</span>
+    <span class="kw">self</span>._last_top_indices = [idx <span class="kw">for</span> idx, _ <span class="kw">in</span> ranked[:adaptive_k]]
+
+    <span class="kw">return</span> ranked[:adaptive_k]</pre>
+        </div>
+
+        <div class="formula-box">
+          Re-Rank Score = <span class="hl">0.50</span> · ngram_overlap( q, p )
+                         + <span class="hl">0.35</span> · entity_hits( q, p )
+                         + <span class="hl">0.15</span> · position_coherence( idx )
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-number">4 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

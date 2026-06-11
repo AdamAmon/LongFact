@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 技术路线总览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .pipeline-flow {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+    padding-top: var(--space-xl);
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 240px;
+    position: relative;
+  }
+
+  .stage-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: var(--color-surface);
+    border: 2px solid var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: var(--color-primary);
+    margin-bottom: var(--space-sm);
+    position: relative;
+    z-index: 2;
+  }
+
+  .stage-icon.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: white;
+  }
+
+  .stage-label {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 17px;
+    color: var(--color-primary-dark);
+    text-align: center;
+    margin-bottom: 4px;
+  }
+
+  .stage-desc {
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+    color: var(--color-text-muted);
+    text-align: center;
+    line-height: 1.5;
+    max-width: 200px;
+  }
+
+  .stage .badge {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+
+  .connector {
+    width: 60px;
+    height: 2px;
+    background: var(--color-border);
+    margin-top: 36px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .connector::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: -3px;
+    width: 0;
+    height: 0;
+    border-left: 8px solid var(--color-primary-light);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+  }
+
+  .tech-stack {
+    margin-top: var(--space-xl);
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .tech-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 6px 16px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-text);
+  }
+
+  .tech-item .tech-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .tech-item .tech-dot.model { background: var(--color-primary); }
+  .tech-item .tech-dot.data  { background: var(--color-accent); }
+  .tech-item .tech-dot.eval  { background: var(--color-success); }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <!-- Header -->
+  <div class="slide-header">
+    <span class="kick">Architecture</span>
+    <span class="page-title">技术路线总览</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">端到端管道：从生成到评估的完整闭环</h2>
+
+    <!-- Pipeline flow -->
+    <div class="pipeline-flow">
+
+      <!-- Stage 1: Data Loading -->
+      <div class="stage">
+        <div class="stage-icon">&#x1F4E6;</div>
+        <div class="stage-label">数据加载</div>
+        <div class="stage-desc">GovReport 数据集<br>Validation Split<br>采样 N = 500</div>
+        <span class="badge">data/load_govreport.py</span>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- Stage 2: Chunk-Based Summarization -->
+      <div class="stage">
+        <div class="stage-icon active">&#x270D;</div>
+        <div class="stage-label">分块摘要</div>
+        <div class="stage-desc">chunk_text() → 摘要<br>Qwen2.5-1.5B-Instruct<br>max_new_tokens=64</div>
+        <span class="badge">summarize/run_summarize.py</span>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- Stage 3: Evidence Retrieval -->
+      <div class="stage">
+        <div class="stage-icon active">&#x1F50D;</div>
+        <div class="stage-label">证据检索</div>
+        <div class="stage-desc">DCE 双通道融合<br>SBERT + BM25<br>自适应 Top-K</div>
+        <span class="badge">retrieval/advanced_retriever.py</span>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- Stage 4: NLI Verification -->
+      <div class="stage">
+        <div class="stage-icon">&#x2696;</div>
+        <div class="stage-label">NLI 判定</div>
+        <div class="stage-desc">bart-large-mnli<br>ENTAIL/CONTRA/NEUTRAL<br>threshold ≥ 0.6</div>
+        <span class="badge">nli/nli_check.py</span>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- Stage 5: Correction -->
+      <div class="stage">
+        <div class="stage-icon">&#x1F527;</div>
+        <div class="stage-label">证据纠错</div>
+        <div class="stage-desc">证据导向局部改写<br>仅修改 unsupported<br>保留原文结构</div>
+        <span class="badge">correction/corrector.py</span>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- Stage 6: Evaluation -->
+      <div class="stage">
+        <div class="stage-icon">&#x1F4CA;</div>
+        <div class="stage-label">双重评估</div>
+        <div class="stage-desc">Support Rate<br>ROUGE-1/2/L<br>纠错前后对比</div>
+        <span class="badge">eval/evaluate.py</span>
+      </div>
+    </div>
+
+    <!-- Feedback loop -->
+    <div style="text-align:center;margin-top:var(--space-md);font-family:var(--font-display-cn);font-size:13px;color:var(--color-text-muted);">
+      纠错后摘要   →   NLI 重新判定   →   corrected_support_rate
+      <span style="display:inline-block;margin-left:6px;font-family:var(--font-mono);color:var(--color-accent);">↻ feedback loop</span>
+    </div>
+
+    <!-- Tech stack bar -->
+    <div class="tech-stack">
+      <div class="tech-item"><span class="tech-dot model"></span> Qwen2.5-1.5B</div>
+      <div class="tech-item"><span class="tech-dot model"></span> BART-Large-MNLI</div>
+      <div class="tech-item"><span class="tech-dot model"></span> all-MiniLM-L6-v2</div>
+      <div class="tech-item"><span class="tech-dot data"></span> FAISS</div>
+      <div class="tech-item"><span class="tech-dot data"></span> BM25</div>
+      <div class="tech-item"><span class="tech-dot eval"></span> ROUGE</div>
+      <div class="tech-item"><span class="tech-dot model"></span> PyTorch 2.5</div>
+      <div class="tech-item"><span class="tech-dot data"></span> GovReport</div>
+    </div>
+
+    <div class="page-number">3 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

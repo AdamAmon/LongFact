@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 问题与反思</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .reflection-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr;
+    gap: var(--space-lg);
+    flex: 1;
+  }
+  .challenges-box {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+  }
+  .challenges-box h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 22px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 2px solid var(--color-accent);
+    display: inline-block;
+  }
+  .challenge-item {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--color-border-light);
+    align-items: flex-start;
+  }
+  .challenge-item:last-child {
+    border-bottom: none;
+  }
+  .challenge-item .c-num {
+    font-family: var(--font-display-en);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--color-accent);
+    opacity: 0.5;
+    min-width: 32px;
+  }
+  .challenge-item .c-content h4 {
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--color-text);
+    margin-bottom: 4px;
+  }
+  .challenge-item .c-content p {
+    font-family: var(--font-display-cn);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+  }
+  .challenge-item .c-content .solution {
+    margin-top: 4px;
+    padding: 4px 8px;
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+    color: var(--color-success);
+    background: oklch(0.96 0.02 155);
+    display: inline-block;
+  }
+  .challenge-item .c-content .unsolved {
+    margin-top: 4px;
+    padding: 4px 8px;
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+    color: var(--color-accent);
+    background: oklch(0.96 0.02 45);
+    display: inline-block;
+  }
+  .limitations-box {
+    grid-column: 2;
+    grid-row: 1;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+  }
+  .limitations-box h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 22px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 2px solid var(--color-accent);
+    display: inline-block;
+  }
+  .limit-item {
+    font-family: var(--font-display-cn);
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+    padding: 6px 0;
+    padding-left: 16px;
+    position: relative;
+  }
+  .limit-item::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--color-accent);
+  }
+  .case-card {
+    grid-column: 2;
+    grid-row: 2;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+  }
+  .case-card h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 22px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-sm);
+    padding-bottom: var(--space-sm);
+    border-bottom: 2px solid var(--color-accent);
+    display: inline-block;
+  }
+  .case-example {
+    font-family: var(--font-display-cn);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+    flex: 1;
+    overflow-y: auto;
+  }
+  .case-example .orig {
+    padding: 6px 10px;
+    margin: 6px 0;
+    border-left: 3px solid oklch(0.50 0.19 25);
+    background: oklch(0.97 0.005 25);
+    font-style: italic;
+    font-size: 13px;
+  }
+  .case-example .corr {
+    padding: 6px 10px;
+    margin: 6px 0;
+    border-left: 3px solid oklch(0.55 0.15 155);
+    background: oklch(0.97 0.01 155);
+    font-size: 13px;
+  }
+  .case-example .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-muted);
+    display: block;
+  }
+  .case-example .delta-good {
+    color: var(--color-success);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .case-example .delta-bad {
+    color: var(--color-error);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Reflection</span>
+    <span class="page-title">问题与反思</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">实验中的挑战、解决方案与项目局限性</h2>
+
+    <div class="reflection-layout">
+
+      <!-- Challenges & Solutions -->
+      <div class="challenges-box">
+        <h3>挑战与解决方案</h3>
+
+        <div class="challenge-item">
+          <div class="c-num">1</div>
+          <div class="c-content">
+            <h4>8GB 显存约束下的模型加载</h4>
+            <p>Qwen2.5-1.5B + BART-large-mnli + all-MiniLM 三个模型共享 8GB VRAM 极其紧张。</p>
+            <span class="solution">✓ 已解决：实现模块级缓存 + 逐阶段加载/卸载 + fp16 精度，确保稳定运行</span>
+          </div>
+        </div>
+
+        <div class="challenge-item">
+          <div class="c-num">2</div>
+          <div class="c-content">
+            <h4>长度分桶失效问题</h4>
+            <p>初始等距分桶 (1–3, 4–6, ..., 16+) 中，所有 500 样本落在 16+ 桶，完全失去区分能力。</p>
+            <span class="solution">✓ 已解决：改用百分位分桶（4 等分 × 125 样本），揭示清晰的长度依赖规律</span>
+          </div>
+        </div>
+
+        <div class="challenge-item">
+          <div class="c-num">3</div>
+          <div class="c-content">
+            <h4>DCE 高 NEUTRAL 率</h4>
+            <p>63–69% 的 NLI 判定为 NEUTRAL，表明大量摘要句缺乏足够的证据覆盖。</p>
+            <span class="unsolved">⧖ 待改进：可通过查询改写、迭代检索扩展或段落级证据扩大覆盖</span>
+          </div>
+        </div>
+
+        <div class="challenge-item">
+          <div class="c-num">4</div>
+          <div class="c-content">
+            <h4>纠错模型的负面案例</h4>
+            <p>DCE Case 119 支持率下降 0.1223，DCE 的精确证据可能使纠正器"过度润色"，偏离原文事实。</p>
+            <span class="unsolved">⧖ 待改进：引入置信度门槛 + 实体保护机制 + 多轮自验证</span>
+          </div>
+        </div>
+
+        <div class="challenge-item">
+          <div class="c-num">5</div>
+          <div class="c-content">
+            <h4>同一模型生成 + 纠错的偏差</h4>
+            <p>Qwen2.5-1.5B 同时用于摘要生成和纠错，可能传播生成偏差。</p>
+            <span class="solution">✓ 已识别：论文中明确建议使用独立纠错模型作为未来方向</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Limitations -->
+      <div class="limitations-box">
+        <h3>项目局限性</h3>
+        <div class="limit-item">单轮纠错：无迭代验证循环，可能遗漏二次错误</div>
+        <div class="limit-item">无人机评估：自动 NLI 可能误判，缺乏人工标注验证</div>
+        <div class="limit-item">模型规模有限：1.5B 参数的摘要模型，生成质量受限于模型能力</div>
+        <div class="limit-item">数据集局限：仅 GovReport 验证集，跨域泛化能力未知</div>
+        <div class="limit-item">证据检索覆盖：63–69% NEUTRAL 率说明检索仍有提升空间</div>
+      </div>
+
+      <!-- Illustrative Case -->
+      <div class="case-card">
+        <h3>典型案例：ROUGE-Support 正交性</h3>
+        <div class="case-example">
+          <span class="label">DCE Case 305 — Support +0.3052, ROUGE-1 +0.0037</span>
+          <div class="orig">
+            <span class="label">原始摘要句（NLI 判定 NEUTRAL）：</span>
+            "The report examines law enforcement challenges and training programs for officers."
+          </div>
+          <div class="corr">
+            <span class="label">纠错后（NLI 判定 ENTAILMENT）：</span>
+            "The report examines training programs such as de-escalation and crisis intervention for law enforcement officers facing mental health encounters."
+          </div>
+          <p style="margin-top:8px;font-size:13px;">
+            <span class="delta-good">支持率 +0.3052</span> &nbsp;|&nbsp;
+            <span style="font-family:var(--font-mono);">ROUGE-1 Δ ≈ 0</span><br>
+            纠错将泛泛之辞替换为证据锚定的具体词汇，ROUGE 无法区分这种事实性提升。
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-number">9 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

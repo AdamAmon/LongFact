@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 创新点</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .innovation-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: var(--space-lg);
+    flex: 1;
+  }
+  .inno-card {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .inno-card .inno-num {
+    position: absolute;
+    bottom: 8px;
+    right: 20px;
+    font-family: var(--font-display-en);
+    font-size: 80px;
+    font-weight: 700;
+    color: var(--color-accent);
+    opacity: 0.06;
+    pointer-events: none;
+    line-height: 1;
+  }
+  .inno-card .inno-label {
+    font-family: var(--font-display-en);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--color-accent);
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .inno-card h3 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 22px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-sm);
+  }
+  .inno-card .inno-body {
+    font-family: var(--font-display-cn);
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--color-text-secondary);
+    flex: 1;
+  }
+  .inno-card .inno-body strong {
+    color: var(--color-primary);
+  }
+  .inno-card .inno-compare {
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--color-border-light);
+    display: flex;
+    gap: var(--space-lg);
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+  }
+  .inno-card .inno-compare .vs-label {
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+  .inno-card .inno-compare .vs-existing {
+    color: var(--color-text-muted);
+  }
+  .inno-card .inno-compare .vs-ours {
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  .dce-architecture {
+    margin-top: var(--space-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-alt);
+  }
+  .dce-arch-box {
+    text-align: center;
+    padding: var(--space-sm) var(--space-md);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-text);
+  }
+  .dce-arch-box.top {
+    border-bottom: 1px solid var(--color-border);
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Innovation</span>
+    <span class="page-title">项目创新点</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">四项原创贡献 · 算法设计完全自主</h2>
+
+    <div class="innovation-layout">
+
+      <!-- Innovation 1: DCE Pipeline -->
+      <div class="inno-card">
+        <div class="inno-num">01</div>
+        <div class="inno-label">INNOVATION · Algorithm</div>
+        <h3>DCE 双通道证据检索</h3>
+        <div class="inno-body">
+          原创设计：<strong>语义 + 关键词双通道</strong>融合，配合<strong>零额外模型开销</strong>的轻量级重排序（n-gram Jaccard + 实体命中 + 位置一致性），与自适应 Top-K 和条件证据扩展协同工作。4 项机制均为 <strong>原创设计</strong>，未借鉴已有论文方法。
+        </div>
+        <div class="inno-compare">
+          <span class="vs-label">vs 现有方法</span>
+          <span class="vs-existing">标准检索：单一语义通道 + 固定 Top-K，噪声证据 → 假阳性 ENTAILMENT</span>
+          <span class="vs-ours">→ DCE 减少假阳性 6.16pp</span>
+        </div>
+      </div>
+
+      <!-- Innovation 2: Complete Pipeline -->
+      <div class="inno-card">
+        <div class="inno-num">02</div>
+        <div class="inno-label">INNOVATION · Engineering</div>
+        <h3>完整的 Generate–Detect–Correct–Evaluate 管道</h3>
+        <div class="inno-body">
+          从<strong>分块摘要 → 证据检索 → 句子级 NLI → 局部纠错 → 双重评估</strong>，每个模块可独立替换和实验。支持 <strong>fp16 / 8-bit / CPU 回退</strong>多精度配置，在 8GB VRAM 上稳定运行 500 样本实验。
+        </div>
+        <div class="inno-compare">
+          <span class="vs-label">vs 现有方法</span>
+          <span class="vs-existing">多数研究仅覆盖单一环节，缺乏端到端可复现实验框架</span>
+          <span class="vs-obs">→ 本项目提供完整代码 + 16 项测试 + 分阶段耗时统计</span>
+        </div>
+      </div>
+
+      <!-- Innovation 3: ROUGE-Support Orthogonality -->
+      <div class="inno-card">
+        <div class="inno-num">03</div>
+        <div class="inno-label">INNOVATION · Analysis</div>
+        <h3>ROUGE 与事实一致性正交的实证证明</h3>
+        <div class="inno-body">
+          通过 <strong>500 样本定量实验 + 20 个案例深度分析</strong>，系统证明了：自动纠错可将支持率提升 <strong>+10pp</strong>，而 ROUGE 变化 <strong>&lt; 0.002</strong>。从微观测例（DCE Case 305：支持率 +0.3052 而 ROUGE 几乎不变）到宏观统计，完整揭示了 ROUGE 作为事实评估指标的根本缺陷。
+        </div>
+        <div class="inno-compare">
+          <span class="vs-label">vs 现有方法</span>
+          <span class="vs-existing">已有论文讨论了 ROUGE 的不足，但缺乏大规模+细粒度案例的双重实证</span>
+        </div>
+      </div>
+
+      <!-- Innovation 4: Length Analysis -->
+      <div class="inno-card">
+        <div class="inno-num">04</div>
+        <div class="inno-label">INNOVATION · Methodology</div>
+        <h3>长度分层分析 + 纠错案例双策略对比</h3>
+        <div class="inno-body">
+          针对 GovReport 样本全落在 16+ 桶的问题，设计<strong>百分位分桶策略</strong>（每桶 125 个样本），揭示四个规律：支持率随长度递减、校正增益随长度递增、ROUGE 随长度锐减、NLI 分布长度稳定。同时按 <strong>Top-5 改善 / Top-5 恶化</strong> 选取案例，Baseline 和 DCE 各 10 例进行交叉分析。
+        </div>
+        <div class="inno-compare">
+          <span class="vs-label">vs 现有方法</span>
+          <span class="vs-existing">常规等距分桶在长尾数据中失效</span>
+          <span class="vs-ours">→ 百分位分桶 + 双策略案例交叉分析</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-number">8 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

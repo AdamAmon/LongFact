@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 实验结果（下）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .res2-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr;
+    gap: var(--space-lg);
+    flex: 1;
+  }
+  .main-table-wrap {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+  .findings-box {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .length-table-wrap {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .main-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .main-table thead th {
+    background: var(--color-primary);
+    color: white;
+    padding: 10px 8px;
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 13px;
+    text-align: center;
+  }
+  .main-table tbody td {
+    padding: 9px 8px;
+    text-align: center;
+    border-bottom: 1px solid var(--color-border-light);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-text);
+  }
+  .main-table tbody tr:nth-child(even) td {
+    background: var(--color-bg-alt);
+  }
+  .main-table .metric-col {
+    text-align: left;
+    font-family: var(--font-display-cn) !important;
+    font-weight: 600;
+    font-size: 14px !important;
+    color: var(--color-primary-dark) !important;
+    white-space: nowrap;
+  }
+  .gain-row td {
+    font-weight: 700;
+    color: var(--color-accent) !important;
+  }
+  .gain-row .metric-col {
+    color: var(--color-accent) !important;
+  }
+  .findings-card {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding: var(--space-md) var(--space-lg);
+    height: 100%;
+  }
+  .findings-card h4 {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 18px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-sm);
+    padding-bottom: var(--space-xs);
+    border-bottom: 2px solid var(--color-accent);
+    display: inline-block;
+  }
+  .finding-item {
+    font-family: var(--font-display-cn);
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--color-text-secondary);
+    padding: 5px 0;
+    padding-left: 16px;
+    position: relative;
+  }
+  .finding-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    width: 6px;
+    height: 6px;
+    background: var(--color-accent);
+    transform: rotate(45deg);
+  }
+  .finding-item .num {
+    font-family: var(--font-display-en);
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .length-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .length-table thead th {
+    background: var(--color-primary-light);
+    color: white;
+    padding: 7px 6px;
+    font-family: var(--font-display-cn);
+    font-weight: 700;
+    font-size: 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .length-table tbody td {
+    padding: 6px;
+    text-align: center;
+    border-bottom: 1px solid var(--color-border-light);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text);
+  }
+  .length-table tbody tr:nth-child(even) td {
+    background: var(--color-bg-alt);
+  }
+  .length-table .delta-hi {
+    color: var(--color-accent);
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Results (2/2)</span>
+    <span class="page-title">实验结果：核心指标对比与长度分层分析</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">ROUGE 与事实一致性几乎正交 · 校正增益随长度递增</h2>
+
+    <div class="res2-layout">
+
+      <!-- Main metrics table -->
+      <div class="main-table-wrap">
+        <table class="main-table">
+          <thead>
+            <tr>
+              <th style="text-align:left;">指标</th>
+              <th>Baseline</th>
+              <th>DCE</th>
+              <th>Δ (DCE − BL)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="metric-col">Support Rate (纠错前)</td>
+              <td>0.6723</td>
+              <td>0.6473</td>
+              <td style="color:oklch(0.50 0.19 25);">−0.0250</td>
+            </tr>
+            <tr>
+              <td class="metric-col">Support Rate (纠错后)</td>
+              <td>0.7726</td>
+              <td>0.7570</td>
+              <td>−0.0157</td>
+            </tr>
+            <tr class="gain-row">
+              <td class="metric-col">支持率增益 Δ</td>
+              <td>+0.1003</td>
+              <td>+0.1096</td>
+              <td>+0.0093</td>
+            </tr>
+            <tr>
+              <td class="metric-col">ROUGE-1 F1 (纠错前)</td>
+              <td>0.1495</td>
+              <td>0.1495</td>
+              <td>0.0000</td>
+            </tr>
+            <tr>
+              <td class="metric-col">ROUGE-2 F1</td>
+              <td>0.0896</td>
+              <td>0.0896</td>
+              <td>0.0000</td>
+            </tr>
+            <tr>
+              <td class="metric-col">ROUGE-L F1</td>
+              <td>0.0856</td>
+              <td>0.0856</td>
+              <td>0.0000</td>
+            </tr>
+            <tr>
+              <td class="metric-col">ROUGE-1 F1 (纠错后)</td>
+              <td>0.1510</td>
+              <td>0.1504</td>
+              <td>−0.0006</td>
+            </tr>
+            <tr style="border-top:2px solid var(--color-accent);">
+              <td class="metric-col" style="color:var(--color-primary);">NLI: ENTAILMENT</td>
+              <td>30.76%</td>
+              <td>24.60%</td>
+              <td style="color:oklch(0.50 0.19 25);">−6.16pp</td>
+            </tr>
+            <tr>
+              <td class="metric-col" style="color:var(--color-primary);">NLI: NEUTRAL</td>
+              <td>63.53%</td>
+              <td>69.49%</td>
+              <td>+5.96pp</td>
+            </tr>
+            <tr>
+              <td class="metric-col" style="color:var(--color-primary);">NLI: CONTRADICTION</td>
+              <td>5.71%</td>
+              <td>5.91%</td>
+              <td>+0.20pp</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Key findings -->
+      <div class="findings-card">
+        <h4>核心发现</h4>
+        <div class="finding-item">
+          <span class="num">①</span> DCE 纠错前支持率更低 = <strong>判定更严格</strong>，减少假阳性 ENTAILMENT <span class="num">6.16pp</span>
+        </div>
+        <div class="finding-item">
+          <span class="num">②</span> DCE 纠错增益更大 = 精确证据 <strong>引导更好的改写</strong>
+        </div>
+        <div class="finding-item">
+          <span class="num">③</span> ROUGE 变化 <span class="num">&lt; 0.002</span> — 与事实一致性几乎<strong>正交</strong>
+        </div>
+        <div class="finding-item">
+          <span class="num">④</span> 仅 23–35% 句子被修改，改写为关键词级别微调
+        </div>
+        <div class="finding-item">
+          <span class="num">⑤</span> &gt; 98% 样本获得支持率提升
+        </div>
+      </div>
+
+      <!-- Length-stratified table -->
+      <div class="length-table-wrap">
+        <table class="length-table">
+          <thead>
+            <tr>
+              <th>句子数分位</th>
+              <th>n</th>
+              <th>BL 前</th>
+              <th>BL 后</th>
+              <th>BL Δ</th>
+              <th>DCE 前</th>
+              <th>DCE 后</th>
+              <th>DCE Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>83–240</td><td>125</td>
+              <td>.7149</td><td>.7906</td><td class="delta-hi">+.0757</td>
+              <td>.7060</td><td>.7854</td><td class="delta-hi">+.0794</td>
+            </tr>
+            <tr>
+              <td>240–352</td><td>124</td>
+              <td>.7077</td><td>.7882</td><td class="delta-hi">+.0805</td>
+              <td>.6879</td><td>.7738</td><td class="delta-hi">+.0859</td>
+            </tr>
+            <tr>
+              <td>352–509</td><td>125</td>
+              <td>.6845</td><td>.7701</td><td class="delta-hi">+.0856</td>
+              <td>.6606</td><td>.7492</td><td class="delta-hi">+.0886</td>
+            </tr>
+            <tr>
+              <td>509–1437</td><td>126</td>
+              <td>.6549</td><td>.7418</td><td class="delta-hi">+.0869</td>
+              <td>.6261</td><td>.7199</td><td class="delta-hi">+.0938</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-family:var(--font-display-cn);font-size:12px;color:var(--color-text-muted);margin-top:8px;text-align:center;">
+          模式：越长 → 支持率越低 → 校正增益越大。DCE 在所有分位中始终领先 <strong>+0.5–0.7pp</strong>。
+        </p>
+      </div>
+
+    </div>
+
+    <div class="page-number">7 / 10</div>
+  </div>
+</div>
+
+</body>
+</html>

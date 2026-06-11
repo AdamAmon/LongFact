@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>LongFact — 实验结果（上）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Lora:ital,wght@0,600;0,700;1,400;1,600&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .charts-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: var(--space-md);
+    flex: 1;
+  }
+  .chart-panel {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-sm) var(--space-md);
+  }
+  .chart-panel .chart-title {
+    font-family: var(--font-display-cn);
+    font-weight: 900;
+    font-size: 16px;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--space-xs);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .chart-panel .chart-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .chart-panel canvas {
+    width: 100%;
+    height: 100%;
+  }
+  .chart-legend {
+    display: flex;
+    gap: var(--space-md);
+    justify-content: center;
+    font-family: var(--font-display-cn);
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+  .chart-legend .swatch {
+    display: inline-block;
+    width: 16px;
+    height: 12px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+
+  <div class="slide-header">
+    <span class="kick">Results (1/2)</span>
+    <span class="page-title">实验结果：支持率与 NLI 分布</span>
+  </div>
+
+  <div class="slide-body">
+
+    <h2 class="section-heading">DCE 更严格的判定 + 更大的纠错增益</h2>
+
+    <div class="charts-layout">
+
+      <!-- Chart 1: Support Rate Bar -->
+      <div class="chart-panel">
+        <div class="chart-title">支持率对比：纠错前后</div>
+        <div class="chart-area">
+          <canvas id="chart1"></canvas>
+        </div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background:oklch(0.45 0.06 255);"></span>纠错前</span>
+          <span><span class="swatch" style="background:oklch(0.58 0.08 255);"></span>纠错后</span>
+        </div>
+      </div>
+
+      <!-- Chart 2: Support Delta -->
+      <div class="chart-panel">
+        <div class="chart-title">校正增益 Δ：Baseline vs DCE</div>
+        <div class="chart-area">
+          <canvas id="chart2"></canvas>
+        </div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background:oklch(0.55 0.18 45);"></span>Δ 支持率</span>
+        </div>
+      </div>
+
+      <!-- Chart 3: NLI Pie -->
+      <div class="chart-panel">
+        <div class="chart-title">NLI 标签分布：Baseline vs DCE</div>
+        <div class="chart-area">
+          <canvas id="chart3"></canvas>
+        </div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background:oklch(0.55 0.15 155);"></span>ENTAILMENT</span>
+          <span><span class="swatch" style="background:oklch(0.60 0.05 260);"></span>NEUTRAL</span>
+          <span><span class="swatch" style="background:oklch(0.50 0.19 25);"></span>CONTRADICTION</span>
+        </div>
+      </div>
+
+      <!-- Chart 4: Support Histogram -->
+      <div class="chart-panel">
+        <div class="chart-title">支持率分布直方图</div>
+        <div class="chart-area">
+          <canvas id="chart4"></canvas>
+        </div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background:oklch(0.45 0.06 255);"></span>Baseline</span>
+          <span><span class="swatch" style="background:oklch(0.55 0.18 45);"></span>DCE</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-number">6 / 10</div>
+  </div>
+</div>
+
+<script>
+// === Chart 1: Support Rate Bar Chart (Before/After, Baseline vs DCE) ===
+(function() {
+  const c = document.getElementById('chart1');
+  const ctx = c.getContext('2d');
+  const W = c.parentElement.clientWidth;
+  const H = c.parentElement.clientHeight;
+  c.width = W * 2; c.height = H * 2;
+  ctx.scale(2, 2);
+
+  const pad = { top: 20, right: 60, bottom: 50, left: 70 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const groups = ['Baseline', 'DCE'];
+  const before = [0.6723, 0.6473];
+  const after  = [0.7726, 0.7570];
+  const barW = pw * 0.15;
+  const gap = pw * 0.08;
+
+  // Y scale
+  const yMax = 0.85;
+  const yMin = 0.55;
+  function yPos(v) { return pad.top + ph * (1 - (v - yMin) / (yMax - yMin)); }
+
+  // Axes
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+  ctx.lineTo(pad.left + pw, pad.top + ph);
+  ctx.stroke();
+
+  // Y labels
+  ctx.fillStyle = '#888'; ctx.font = '12px "JetBrains Mono"'; ctx.textAlign = 'right';
+  for (let v = 0.55; v <= 0.85; v += 0.05) {
+    ctx.fillText(v.toFixed(2), pad.left - 8, yPos(v) + 4);
+    ctx.beginPath(); ctx.strokeStyle = '#eee';
+    ctx.moveTo(pad.left, yPos(v)); ctx.lineTo(pad.left + pw, yPos(v)); ctx.stroke();
+  }
+
+  // Bars
+  const colors = { before: 'oklch(0.45 0.06 255)', after: 'oklch(0.58 0.08 255)' };
+  groups.forEach((g, gi) => {
+    const cx = pad.left + pw * 0.25 + gi * pw * 0.5;
+    // Before bar
+    ctx.fillStyle = colors.before;
+    ctx.fillRect(cx - barW - 8, yPos(before[gi]), barW, yPos(yMin) - yPos(before[gi]));
+    // After bar
+    ctx.fillStyle = colors.after;
+    ctx.fillRect(cx + 8, yPos(after[gi]), barW, yPos(yMin) - yPos(after[gi]));
+    // Labels
+    ctx.fillStyle = '#333'; ctx.font = '14px "Noto Serif SC"'; ctx.textAlign = 'center';
+    ctx.fillText(g, cx, yPos(yMin) + 20);
+    // Values
+    ctx.fillStyle = '#555'; ctx.font = 'bold 13px "JetBrains Mono"'; ctx.textAlign = 'center';
+    ctx.fillText((before[gi]*100).toFixed(1)+'%', cx - barW - 8, yPos(before[gi]) - 6);
+    ctx.fillText((after[gi]*100).toFixed(1)+'%', cx + barW/2 + 8, yPos(after[gi]) - 6);
+  });
+
+  // Gain arrows
+  const blx = pad.left + pw * 0.25 - barW - 8;
+  const bl_y_b = yPos(before[0]);
+  const bl_y_a = yPos(after[0]);
+  ctx.strokeStyle = 'oklch(0.55 0.18 45)'; ctx.lineWidth = 2; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(blx - 30, bl_y_b); ctx.lineTo(blx - 30, bl_y_a); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'oklch(0.55 0.18 45)'; ctx.font = 'bold 12px "JetBrains Mono"';
+  ctx.fillText('+10.03pp', blx - 30 - 48, (bl_y_b + bl_y_a) / 2 + 4);
+
+  const dce_x = pad.left + pw * 0.75 + 8;
+  ctx.strokeStyle = 'oklch(0.55 0.18 45)'; ctx.lineWidth = 2; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(dce_x + barW + 20, yPos(before[1]));
+  ctx.lineTo(dce_x + barW + 20, yPos(after[1])); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'oklch(0.55 0.18 45)'; ctx.font = 'bold 12px "JetBrains Mono"';
+  ctx.fillText('+10.96pp', dce_x + barW + 20 + 8, (yPos(before[1]) + yPos(after[1])) / 2 + 4);
+})();
+
+// === Chart 2: Support Delta Bar ===
+(function() {
+  const c = document.getElementById('chart2');
+  const ctx = c.getContext('2d');
+  const W = c.parentElement.clientWidth;
+  const H = c.parentElement.clientHeight;
+  c.width = W * 2; c.height = H * 2;
+  ctx.scale(2, 2);
+
+  const pad = { top: 30, right: 60, bottom: 50, left: 80 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const values = [0.1003, 0.1096];
+  const labels = ['Baseline\n+10.03pp', 'DCE\n+10.96pp'];
+  const barW = pw * 0.3;
+  const yMax = 0.14;
+
+  function yPos(v) { return pad.top + ph * (1 - v / yMax); }
+
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+  ctx.lineTo(pad.left + pw, pad.top + ph);
+  ctx.stroke();
+
+  ctx.fillStyle = '#888'; ctx.font = '12px "JetBrains Mono"'; ctx.textAlign = 'right';
+  for (let v = 0; v <= 0.14; v += 0.02) {
+    ctx.fillText((v*100).toFixed(0)+'pp', pad.left - 8, yPos(v) + 4);
+    ctx.beginPath(); ctx.strokeStyle = '#eee';
+    ctx.moveTo(pad.left, yPos(v)); ctx.lineTo(pad.left + pw, yPos(v)); ctx.stroke();
+  }
+
+  values.forEach((v, i) => {
+    const cx = pad.left + pw * 0.2 + i * pw * 0.6;
+    const gradient = ctx.createLinearGradient(cx, yPos(v), cx, yPos(0));
+    gradient.addColorStop(0, 'oklch(0.65 0.14 45)');
+    gradient.addColorStop(1, 'oklch(0.45 0.18 45)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(cx - barW/2, yPos(v), barW, yPos(0) - yPos(v));
+    ctx.fillStyle = '#333'; ctx.font = '14px "Noto Serif SC"'; ctx.textAlign = 'center';
+    ctx.fillText(labels[i], cx, yPos(0) + 22);
+    ctx.fillStyle = 'oklch(0.45 0.18 45)'; ctx.font = 'bold 16px "JetBrains Mono"';
+    ctx.fillText('+'+(v*100).toFixed(2)+'pp', cx, yPos(v) - 10);
+  });
+})();
+
+// === Chart 3: NLI Pie (Grouped bar showing both) ===
+(function() {
+  const c = document.getElementById('chart3');
+  const ctx = c.getContext('2d');
+  const W = c.parentElement.clientWidth;
+  const H = c.parentElement.clientHeight;
+  c.width = W * 2; c.height = H * 2;
+  ctx.scale(2, 2);
+
+  const pad = { top: 30, right: 40, bottom: 50, left: 70 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const labels = ['ENTAILMENT', 'NEUTRAL', 'CONTRADICTION'];
+  const baseline = [30.76, 63.53, 5.71];
+  const dce      = [24.60, 69.49, 5.91];
+  const colors   = ['oklch(0.55 0.15 155)', 'oklch(0.60 0.05 260)', 'oklch(0.50 0.19 25)'];
+
+  function yPos(v) { return pad.top + ph * (1 - v / 75); }
+
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+  ctx.lineTo(pad.left + pw, pad.top + ph);
+  ctx.stroke();
+
+  ctx.fillStyle = '#888'; ctx.font = '12px "JetBrains Mono"'; ctx.textAlign = 'right';
+  for (let v = 0; v <= 75; v += 15) {
+    ctx.fillText(v+'%', pad.left - 8, yPos(v) + 4);
+    ctx.beginPath(); ctx.strokeStyle = '#eee';
+    ctx.moveTo(pad.left, yPos(v)); ctx.lineTo(pad.left + pw, yPos(v)); ctx.stroke();
+  }
+
+  const groupW = pw * 0.35;
+  const barW = groupW * 0.3;
+  labels.forEach((l, li) => {
+    const gxBase = pad.left + pw * 0.12 + li * pw * 0.3;
+    // Baseline
+    ctx.fillStyle = colors[li];
+    ctx.globalAlpha = 0.65;
+    ctx.fillRect(gxBase - barW - 4, yPos(baseline[li]), barW, yPos(0) - yPos(baseline[li]));
+    // DCE
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = colors[li];
+    ctx.fillRect(gxBase + 4, yPos(dce[li]), barW, yPos(0) - yPos(dce[li]));
+    // Labels
+    ctx.fillStyle = '#333'; ctx.font = '13px "Noto Serif SC"'; ctx.textAlign = 'center';
+    ctx.fillText(l, gxBase, yPos(0) + 20);
+    // Values
+    ctx.fillStyle = '#555'; ctx.font = '10px "JetBrains Mono"';
+    ctx.fillText(baseline[li].toFixed(1)+'%', gxBase - barW - 4, yPos(baseline[li]) - 6);
+    ctx.fillText(dce[li].toFixed(1)+'%', gxBase + barW/2 + 4, yPos(dce[li]) - 6);
+  });
+
+  // Legend B/D labels
+  ctx.fillStyle = '#333'; ctx.font = '11px "Noto Serif SC"'; ctx.textAlign = 'left';
+  ctx.fillText('B = Baseline    D = DCE', pad.left + pw - 160, pad.top + 12);
+  // Delta annotation for ENTAILMENT
+  const ex = pad.left + pw * 0.12;
+  const ey = (yPos(baseline[0]) + yPos(dce[0])) / 2;
+  ctx.fillStyle = 'oklch(0.50 0.19 25)'; ctx.font = 'bold 12px "JetBrains Mono"';
+  ctx.fillText('↓ 6.16pp', ex + barW + 30, ey + 4);
+})();
+
+// === Chart 4: Support Histogram ===
+(function() {
+  const c = document.getElementById('chart4');
+  const ctx = c.getContext('2d');
+  const W = c.parentElement.clientWidth;
+  const H = c.parentElement.clientHeight;
+  c.width = W * 2; c.height = H * 2;
+  ctx.scale(2, 2);
+
+  const pad = { top: 20, right: 40, bottom: 50, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const bins = ['0.4–0.6', '0.6–0.8', '0.8–1.0'];
+  const baseline = [8.0, 89.0, 3.0];
+  const dce      = [17.8, 82.0, 0.2];
+
+  function yPos(v) { return pad.top + ph * (1 - v / 100); }
+
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+  ctx.lineTo(pad.left + pw, pad.top + ph);
+  ctx.stroke();
+
+  ctx.fillStyle = '#888'; ctx.font = '12px "JetBrains Mono"'; ctx.textAlign = 'right';
+  for (let v = 0; v <= 100; v += 20) {
+    ctx.fillText(v+'%', pad.left - 8, yPos(v) + 4);
+    ctx.beginPath(); ctx.strokeStyle = '#eee';
+    ctx.moveTo(pad.left, yPos(v)); ctx.lineTo(pad.left + pw, yPos(v)); ctx.stroke();
+  }
+
+  const barW = pw * 0.08;
+  bins.forEach((b, bi) => {
+    const gx = pad.left + pw * 0.15 + bi * pw * 0.3;
+    // Baseline
+    ctx.fillStyle = 'oklch(0.45 0.06 255)'; ctx.globalAlpha = 0.7;
+    ctx.fillRect(gx - barW - 4, yPos(baseline[bi]), barW, yPos(0) - yPos(baseline[bi]));
+    // DCE
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'oklch(0.55 0.18 45)';
+    ctx.fillRect(gx + 4, yPos(dce[bi]), barW, yPos(0) - yPos(dce[bi]));
+    // Label
+    ctx.fillStyle = '#333'; ctx.font = '13px "Noto Serif SC"'; ctx.textAlign = 'center';
+    ctx.globalAlpha = 1;
+    ctx.fillText(b, gx, yPos(0) + 20);
+    // Values
+    ctx.fillStyle = '#555'; ctx.font = '10px "JetBrains Mono"';
+    ctx.fillText(baseline[bi].toFixed(1)+'%', gx - barW - 4, yPos(baseline[bi]) - 6);
+    ctx.fillText(dce[bi].toFixed(1)+'%', gx + barW/2 + 4, yPos(dce[bi]) - 6);
+  });
+})();
+</script>
+
+</body>
+</html>
